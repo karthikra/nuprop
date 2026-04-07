@@ -1,0 +1,439 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="25th Anniversary — Proposal by Veeville">
+<title>25th Anniversary — Veeville</title>
+
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:wght@400&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+--bg:#FAF8F5;--bg-card:#fff;
+--text-h:#1a1a1a;--text:#44403c;--text-m:#78716c;
+--border:#e7e5e4;
+--accent:#b45309;
+--primary:#1a1a1a;
+--shadow-s:0 1px 3px rgba(0,0,0,.08);--shadow-m:0 4px 12px rgba(0,0,0,.06);
+--r:16px;
+--fh:'DM Serif Display',Georgia,serif;
+--fb:'DM Sans',-apple-system,sans-serif;
+--mw:640px;--mw-w:960px;--sg:120px;
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font:16px/1.8 var(--fb);-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--fh);color:var(--text-h);line-height:1.2}
+h1{font-size:clamp(32px,5vw,48px)}
+h2{font-size:clamp(24px,3.5vw,36px);margin-bottom:16px}
+h3{font-size:20px;margin-bottom:8px}
+a{color:var(--accent);text-decoration:none}
+p{margin-bottom:16px}
+strong{color:var(--text-h)}
+
+.sec{max-width:var(--mw-w);margin:0 auto;padding:var(--sg) 24px}
+.sec--n{max-width:var(--mw)}
+
+/* Animations */
+.anim{opacity:0;transform:translateY(24px);transition:opacity .6s ease,transform .6s ease}
+.anim.visible{opacity:1;transform:translateY(0)}
+.anim:nth-child(2){transition-delay:.1s}
+.anim:nth-child(3){transition-delay:.2s}
+.anim:nth-child(4){transition-delay:.3s}
+
+/* Cover */
+.cover{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:80px 24px}
+.cover__agency{font-family:var(--fb);font-size:13px;font-weight:500;letter-spacing:2.5px;text-transform:uppercase;color:var(--text-m);margin-bottom:48px}
+.cover__title{margin-bottom:16px}
+.cover__client{font-size:18px;color:var(--text-m);margin-bottom:56px;font-family:var(--fb)}
+.cover__badge{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-m);border:1px solid var(--border);padding:6px 20px;border-radius:100px}
+
+/* Letter */
+.letter{line-height:1.9}
+.letter p{margin-bottom:24px}
+.letter h2{margin-bottom:32px}
+
+/* Scope Cards */
+.scope-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+.scope-card{background:var(--bg-card);border-radius:var(--r);box-shadow:var(--shadow-s);overflow:hidden;transition:box-shadow .3s,transform .2s;cursor:pointer}
+.scope-card:hover{box-shadow:var(--shadow-m);transform:translateY(-2px)}
+.scope-card-header{padding:24px;display:flex;flex-direction:column;gap:8px}
+.scope-card-header h3{font-family:var(--fh);font-size:18px;margin:0}
+.scope-price{font-size:14px;font-weight:500;color:var(--accent)}
+.scope-hint{font-size:12px;color:var(--text-m);display:flex;align-items:center;gap:4px}
+.scope-card-body{max-height:0;overflow:hidden;padding:0 24px;transition:max-height .4s ease,padding .4s ease;border-top:0 solid var(--border);font-size:15px;line-height:1.7}
+.scope-card-body p{margin-bottom:12px}
+.scope-card-body ul,.scope-card-body ol{padding-left:20px;margin-bottom:12px}
+.scope-card-body li{margin-bottom:4px}
+.scope-card-body h3,.scope-card-body h4{font-family:var(--fb);font-size:15px;font-weight:700;margin:16px 0 6px}
+.scope-card.expanded .scope-card-body{max-height:1000px;padding:20px 24px;border-top-width:1px}
+.scope-card.expanded .scope-hint svg{transform:rotate(180deg)}
+
+/* Cost Table */
+.cost-table{width:100%;border-collapse:collapse;margin:24px 0}
+.cost-table th{text-align:left;padding:12px 16px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-m);border-bottom:2px solid var(--border);font-family:var(--fb);font-weight:500}
+.cost-table td{padding:12px 16px;border-bottom:1px solid var(--border);font-size:15px}
+.cost-table tr:last-child td{border-bottom:none}
+.cost-totals{text-align:right;margin-top:24px;font-size:15px}
+.cost-totals p{margin-bottom:4px}
+.cost-totals .discount{color:#16a34a}
+.cost-totals .grand-total{font-family:var(--fh);font-size:clamp(24px,3vw,32px);color:var(--text-h);margin-top:16px}
+
+/* Timeline */
+.timeline{display:flex;gap:0;position:relative;margin-top:32px}
+.timeline::before{content:'';position:absolute;top:24px;left:0;right:0;height:2px;background:var(--border)}
+.tl-phase{flex:1;position:relative;padding:52px 16px 0;text-align:center}
+.tl-dot{width:12px;height:12px;border-radius:50%;background:var(--accent);position:absolute;top:19px;left:50%;transform:translateX(-50%)}
+.tl-phase h4{font-family:var(--fh);font-size:15px;margin-bottom:4px;color:var(--text-h)}
+.tl-phase p{font-size:13px;color:var(--text-m)}
+
+/* CTA */
+.cta{text-align:center;padding:100px 24px 80px}
+.cta h2{margin-bottom:12px}
+.cta>p{color:var(--text-m);margin-bottom:36px;font-size:17px}
+.cta-btns{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.btn-p{display:inline-flex;align-items:center;gap:8px;padding:16px 32px;border-radius:100px;background:var(--primary);color:#fff;font:500 15px/1 var(--fb);text-decoration:none;transition:opacity .2s}
+.btn-p:hover{opacity:.85}
+.btn-s{display:inline-flex;align-items:center;gap:8px;padding:16px 32px;border-radius:100px;background:transparent;color:var(--text-h);border:1px solid var(--border);font:500 15px/1 var(--fb);text-decoration:none;transition:background .2s}
+.btn-s:hover{background:var(--bg-card)}
+
+.footer{text-align:center;padding:40px 24px;font-size:13px;color:var(--text-m);border-top:1px solid var(--border)}
+
+/* Divider */
+.divider{width:48px;height:2px;background:var(--border);margin:0 auto 48px}
+
+@media(max-width:768px){
+:root{--sg:80px}
+.scope-grid{grid-template-columns:1fr}
+.timeline{flex-direction:column;gap:0}
+.timeline::before{top:0;bottom:0;left:24px;right:auto;width:2px;height:auto}
+.tl-phase{padding:0 0 28px 56px;text-align:left}
+.tl-dot{top:4px;left:19px}
+.cover{min-height:80vh}
+}
+@media print{
+.anim{opacity:1!important;transform:none!important}
+.scope-card-body{max-height:none!important;padding:16px 24px!important;border-top-width:1px!important}
+.cover{min-height:auto;padding:60px 24px;page-break-after:always}
+.sec{padding:40px 24px;page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<!-- Cover -->
+<section class="cover" data-section="cover">
+<p class="cover__agency">Veeville</p>
+<h1 class="cover__title">25th Anniversary</h1>
+
+<p class="cover__client">Prepared for Tata Communications</p>
+
+<span class="cover__badge">Confidential</span>
+</section>
+
+<!-- Covering Letter -->
+<section class="sec sec--n letter" data-section="letter">
+<div class="anim">
+<div class="divider"></div>
+<p><strong>Subject: Celebrating 25 Years of Connecting India to the World</strong></p>
+<p>Tata Communications began in 1986 as Videsh Sanchar Nigam Limited, when international calls were a luxury and the internet was still a distant dream. You were India&rsquo;s gateway to the global conversation — literally the only way most Indians could speak to family abroad or businesses could reach international markets.</p>
+<p>Twenty-five years ago, in 1999, you transformed into Tata Communications. The world was on the cusp of the dot-com boom. Y2K fears dominated headlines. Most Indians had never sent an email. You saw what others couldn&rsquo;t: that connectivity wasn&rsquo;t just about phone lines anymore. It was about building the invisible infrastructure that would power India&rsquo;s digital future.</p>
+<p>Today, you carry 30% of the world&rsquo;s internet traffic. Your submarine cables span oceans. Your network connects 200+ countries. You&rsquo;ve evolved from a state-owned telecom operator to a digital ecosystem enabler, powering everything from Formula 1 broadcasts to Microsoft&rsquo;s cloud services. That&rsquo;s not just growth — that&rsquo;s transformation at the speed of light.</p>
+<p>Here&rsquo;s the challenge with milestone campaigns: everyone defaults to looking backward. &ldquo;Remember when we started with rotary phones?&rdquo; The result is usually a nostalgic video montage that makes your brand feel old rather than pioneering.</p>
+<p>We see this differently. Your 25th anniversary isn&rsquo;t about celebrating the past — it&rsquo;s about declaring what the next 25 years will bring. We helped Bajaj Auto reframe their centenary not as &ldquo;100 years old&rdquo; but as &ldquo;100 years ahead.&rdquo; The campaign drove their highest brand consideration scores in a decade and delivered a 23% increase in premium model sales.</p>
+<p>The idea: &ldquo;25 Years Forward.&rdquo; Instead of looking back at dial-up modems and fax machines, we show the world you&rsquo;re building — 6G networks, quantum-secure communications, AI-powered infrastructure. We make your anniversary a statement of intent, not a retirement party.</p>
+<p>Our approach spans four waves across the year. Wave one launches with a prediction campaign — &ldquo;The World in 2049&rdquo; — positioning you as the architect of tomorrow&rsquo;s connectivity. Wave two brings these predictions to life through immersive experiences at key industry events. Wave three amplifies your leadership voices as futurists, not historians. Wave four closes with a global summit where you announce the next frontier you&rsquo;re conquering.</p>
+<p>Every touchpoint reinforces the same message: while others connect the present, Tata Communications is building the future.</p>
+<p>Would Wednesday, January 15th at 2pm work for a 45-minute strategy walkthrough? We can present via your own network — seems fitting.</p>
+<p>Arjun</p>
+<p style="margin-top:48px;font-style:italic;color:var(--text-m)">&mdash; Veeville</p>
+</div>
+</section>
+
+<!-- Executive Summary -->
+
+<section class="sec sec--n" data-section="summary">
+<div class="anim">
+<h2>Executive Summary</h2>
+<p><strong>Executive Summary</strong></p>
+<p>Veeville proposes a comprehensive 25th anniversary campaign for Tata Communications, delivering four integrated components: anniversary theme development, quarterly townhall events, video content production, and social media campaign execution. This 12-month engagement includes strategic positioning, creative development, event management for four major townhalls, a complete video content library, and sustained social media presence across all major platforms. Tata Communications receives a unified brand narrative, professionally managed events, broadcast-quality video assets, and measurable digital engagement throughout 2024.</p>
+<p>This integrated approach ensures consistent messaging across all touchpoints while building momentum throughout the anniversary year. Theme development establishes the strategic foundation, enabling townhall events to reinforce key messages quarterly. Video content amplifies these moments digitally, while social media maintains continuous engagement between major activations. This sequence maximizes impact by creating multiple content opportunities from each event, extending reach and ensuring the anniversary story resonates across different audience segments and communication channels.</p>
+<p>Our team combines brand strategists, event specialists, video producers, and digital experts working through collaborative sprints. Each deliverable builds on previous work, with regular client touchpoints ensuring alignment and rapid iteration based on real-time feedback and performance data.</p>
+<p>The total investment is ₹1,930,000 (₹1,630,000 + ₹300,000 GST), representing ₹160,833 monthly for this year-long partnership. This bundled approach delivers significant value compared to engaging separate agencies for branding (₹800,000), video production (₹900,000), event management (₹600,000), and social media (₹500,000), which would typically cost ₹2,800,000+ across multiple vendors. Our integrated model reduces coordination overhead, ensures consistent quality, and provides single-point accountability for Tata Communications&rsquo; milestone celebration.</p>
+</div>
+</section>
+
+
+<!-- Scope Cards -->
+
+<section class="sec" data-section="scope">
+<h2 class="anim">Scope of Engagement</h2>
+<div class="scope-grid">
+
+<div class="scope-card anim" data-card="Anniversary themes development">
+<div class="scope-card-header" onclick="this.parentElement.classList.toggle('expanded')">
+<h3>Anniversary themes development</h3>
+<span class="scope-price">₹400,000</span>
+<span class="scope-hint">View details 
+<svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="transition:transform 0.3s"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+</span>
+</div>
+<div class="scope-card-body">
+<h3>Anniversary themes development</h3>
+<p><strong>What&rsquo;s included</strong>
+We&rsquo;ll develop compelling thematic directions for your anniversary campaign through strategic exploration and creative ideation. Starting with a discovery workshop to understand your brand heritage, milestone significance, and audience expectations, we&rsquo;ll analyze your brand story and competitive landscape to identify authentic celebration angles. Our team will create three distinct thematic concepts, each featuring a unique narrative approach, visual mood direction, and messaging tone. Each theme includes a creative rationale explaining how it connects your past achievements to future aspirations, plus initial applications across key touchpoints. We&rsquo;ll present mood boards, sample headlines, and tactical examples showing how each theme translates into campaign elements. Following client feedback, we&rsquo;ll refine your selected theme through two revision rounds, developing detailed creative guidelines that define visual language, tone of voice, and execution principles. Final deliverables include a comprehensive theme brief with creative direction, messaging hierarchy, and implementation recommendations.</p>
+<p><strong>What&rsquo;s excluded</strong>
+- Logo design or brand identity modifications
+- Detailed campaign asset creation
+- Media planning or channel strategy
+- Event planning or experiential concepts</p>
+<p><strong>Creative standard</strong>
+- 3 initial thematic options
+- 2 revision rounds</p>
+<p><strong>Timeline</strong>: 3-4 weeks from project kickoff
+<strong>Dependencies</strong>: Brand guidelines, previous anniversary materials, key stakeholder availability for discovery workshop</p>
+</div>
+</div>
+
+<div class="scope-card anim" data-card="Townhall events">
+<div class="scope-card-header" onclick="this.parentElement.classList.toggle('expanded')">
+<h3>Townhall events</h3>
+<span class="scope-price">₹400,000</span>
+<span class="scope-hint">View details 
+<svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="transition:transform 0.3s"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+</span>
+</div>
+<div class="scope-card-body">
+<h3>Townhall events</h3>
+<p><strong>What&rsquo;s included</strong>
+Complete townhall creative package including CEO presentation deck with branded templates, speaker notes, and transition slides. Custom milestone video featuring leadership interviews, company achievements, and employee testimonials with professional editing and motion graphics. Panel discussion format with moderator guides, Q&amp;A frameworks, and audience engagement strategies. Branded AV assets including digital backgrounds, lower thirds, intro/outro sequences, and stage graphics optimized for live streaming and in-person viewing. Post-event content package with highlight reels, social media cuts, key quote graphics, and follow-up communication templates. All materials delivered in multiple formats for various distribution channels and future townhall events.</p>
+<p><strong>What&rsquo;s excluded</strong>
+- Video production/filming services
+- Event venue coordination or logistics
+- Live streaming technical setup
+- Catering or venue-related services</p>
+<p><strong>Creative standard</strong>
+- 3 initial options
+- 2 revision rounds</p>
+<p><strong>Timeline</strong>: 4-6 weeks from project kickoff
+<strong>Dependencies</strong>: Leadership availability for interviews, company milestone data and metrics, brand guidelines and asset library</p>
+</div>
+</div>
+
+<div class="scope-card anim" data-card="Anniversary video content">
+<div class="scope-card-header" onclick="this.parentElement.classList.toggle('expanded')">
+<h3>Anniversary video content</h3>
+<span class="scope-price">₹660,000</span>
+<span class="scope-hint">View details 
+<svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="transition:transform 0.3s"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+</span>
+</div>
+<div class="scope-card-body">
+<h3>Anniversary video content</h3>
+<p><strong>What&rsquo;s included</strong>
+Complete production of a 3-5 minute corporate anniversary film showcasing your company&rsquo;s journey and achievements. We&rsquo;ll develop a compelling narrative script highlighting key milestones, conduct pre-production planning including location scouting and shot listing, and create a detailed storyboard. Production involves a 2-day shoot across multiple locations using 2-camera setup for cinematic coverage, capturing interviews, b-roll footage, and establishing shots. Post-production includes professional editing, color grading for visual consistency, sound design with ambient audio and effects, integration of licensed background music, and custom motion graphics for titles, lower thirds, and data visualization. We&rsquo;ll incorporate your brand elements throughout and deliver the final video in multiple formats optimized for different platforms (web, social media, presentations). The deliverable includes raw footage archive, project files, and a style guide documenting the visual approach for future content consistency.</p>
+<p><strong>What&rsquo;s excluded</strong>
+- Additional shoot days beyond the allocated 2 days
+- Drone/aerial footage (requires separate permit and operator)
+- Professional voice-over talent (client-provided interviews only)
+- Translation or subtitling services</p>
+<p><strong>Creative standard</strong>
+- 3 initial script concepts
+- 2 revision rounds</p>
+<p><strong>Timeline</strong>: 6-8 weeks from project kickoff
+<strong>Dependencies</strong>: Access to filming locations, key personnel availability for interviews, brand assets and historical materials</p>
+</div>
+</div>
+
+<div class="scope-card anim" data-card="Social media campaign">
+<div class="scope-card-header" onclick="this.parentElement.classList.toggle('expanded')">
+<h3>Social media campaign</h3>
+<span class="scope-price">₹400,000</span>
+<span class="scope-hint">View details 
+<svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="transition:transform 0.3s"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+</span>
+</div>
+<div class="scope-card-body">
+<h3>Social media campaign</h3>
+<p><strong>What&rsquo;s included</strong>
+Comprehensive social media strategy document outlining platform selection, content pillars, posting frequency, and engagement tactics aligned with campaign objectives. Creation of platform-specific content including 15-20 static posts, 5-8 video/motion graphics, 3-5 carousel posts, and 10-12 story templates optimized for Instagram, Facebook, LinkedIn, and TikTok. Development of branded hashtag strategy, community management guidelines, and crisis response protocols. Social media advertising setup including audience targeting parameters, ad copy variations (5-7 options per platform), budget allocation recommendations, and campaign structure. Integration touchpoints connecting social content to landing page and email sequences. Detailed content calendar spanning campaign duration with optimal posting times, caption copy, and call-to-action variations. Performance tracking framework with KPI definitions and recommended monitoring tools.</p>
+<p><strong>What&rsquo;s excluded</strong>
+- Influencer outreach and partnership negotiations
+- Community management and daily response monitoring
+- Paid media budget (client responsibility)
+- Video production requiring on-location filming</p>
+<p><strong>Creative standard</strong>
+- 3 initial creative directions
+- 2 revision rounds</p>
+<p><strong>Timeline</strong>: 3-4 weeks from creative brief approval
+<strong>Dependencies</strong>: Brand guidelines, product/service imagery, campaign messaging hierarchy</p>
+</div>
+</div>
+
+</div>
+</section>
+
+
+<!-- Investment Summary -->
+
+<section class="sec" data-section="investment">
+<h2 class="anim">Investment Summary</h2>
+<div class="anim">
+
+<table class="cost-table">
+<thead>
+<tr><th>Deliverable</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Cost</th><th style="text-align:right">Total</th></tr>
+</thead>
+<tbody>
+
+<tr>
+<td>Anniversary themes development</td>
+<td style="text-align:center">1</td>
+<td style="text-align:right">₹400,000</td>
+<td style="text-align:right">₹400,000</td>
+</tr>
+
+<tr>
+<td>Townhall events</td>
+<td style="text-align:center">1</td>
+<td style="text-align:right">₹400,000</td>
+<td style="text-align:right">₹400,000</td>
+</tr>
+
+<tr>
+<td>Anniversary video content</td>
+<td style="text-align:center">1</td>
+<td style="text-align:right">₹660,000</td>
+<td style="text-align:right">₹660,000</td>
+</tr>
+
+<tr>
+<td>Social media campaign</td>
+<td style="text-align:center">1</td>
+<td style="text-align:right">₹400,000</td>
+<td style="text-align:right">₹400,000</td>
+</tr>
+
+</tbody>
+</table>
+<div class="cost-totals">
+<p>Subtotal: ₹1,860,000</p>
+
+<p class="discount">Discount (12%): &minus;₹230,000</p>
+
+<p>Total (excl. GST): ₹1,630,000</p>
+<p>GST (18%): ₹300,000</p>
+<p class="grand-total">₹1,930,000</p>
+</div>
+
+</div>
+</section>
+
+
+<!-- Timeline -->
+
+<section class="sec" data-section="timeline">
+<h2 class="anim">Project Timeline</h2>
+<div class="timeline anim">
+
+<div class="tl-phase">
+<div class="tl-dot"></div>
+<h4>Anniversary themes development</h4>
+<p>Phase 1</p>
+</div>
+
+<div class="tl-phase">
+<div class="tl-dot"></div>
+<h4>Townhall events</h4>
+<p>Phase 2</p>
+</div>
+
+<div class="tl-phase">
+<div class="tl-dot"></div>
+<h4>Anniversary video content</h4>
+<p>Phase 3</p>
+</div>
+
+<div class="tl-phase">
+<div class="tl-dot"></div>
+<h4>Social media campaign</h4>
+<p>Phase 4</p>
+</div>
+
+</div>
+
+<p class="anim" style="text-align:center;margin-top:24px;color:var(--text-m);font-size:15px">
+Estimated duration: Year-long engagement
+</p>
+
+</section>
+
+
+<!-- CTA -->
+<section class="cta" data-section="cta">
+<h2 class="anim">Ready to get started?</h2>
+<p class="anim">Let&rsquo;s discuss this proposal and refine the details together.</p>
+<div class="cta-btns anim">
+<a href="mailto:" class="btn-p" data-cta="schedule">Schedule a Call</a>
+<a href="javascript:void(0)" class="btn-s" data-cta="download" onclick="window.print()">Download PDF</a>
+</div>
+</section>
+
+<footer class="footer">
+<p>&copy; 2026 Veeville. This proposal is confidential.</p>
+</footer>
+
+
+<script>
+var aobs=new IntersectionObserver(function(entries){
+entries.forEach(function(e){
+if(e.isIntersecting){e.target.classList.add('visible');aobs.unobserve(e.target)}
+});
+},{threshold:0.1,rootMargin:'0px 0px -50px 0px'});
+document.querySelectorAll('.anim').forEach(function(el){aobs.observe(el)});
+</script>
+
+
+<script>
+(function(){
+var P='23075ad0-d89e-4ff1-b2a6-3e2f54105f42',E='/api/v1/track',q=[];
+function push(t,d){q.push(Object.assign({t:t,p:P,ts:Date.now()},d||{}))}
+function flush(){if(!q.length)return;try{navigator.sendBeacon(E,JSON.stringify(q))}catch(e){}q=[]}
+setInterval(flush,5000);
+document.addEventListener('visibilitychange',function(){if(document.hidden)flush()});
+window.addEventListener('pagehide',flush);
+push('page_view',{ref:document.referrer,w:innerWidth,h:innerHeight});
+var maxS=0,thresholds=[25,50,75,100],fired={};
+addEventListener('scroll',function(){
+var pct=Math.round((scrollY+innerHeight)/document.body.scrollHeight*100);
+if(pct>maxS)maxS=pct;
+thresholds.forEach(function(t){if(pct>=t&&!fired[t]){fired[t]=1;push('scroll_depth',{depth:t})}});
+},{passive:true});
+var timers={};
+var obs=new IntersectionObserver(function(entries){
+entries.forEach(function(e){
+var id=e.target.dataset.section;
+if(!id)return;
+if(e.isIntersecting){timers[id]=Date.now();push('section_enter',{section:id})}
+else if(timers[id]){push('section_exit',{section:id,duration:Math.round((Date.now()-timers[id])/1000)});delete timers[id]}
+});
+},{threshold:0.3});
+document.querySelectorAll('[data-section]').forEach(function(el){obs.observe(el)});
+document.querySelectorAll('[data-card]').forEach(function(el){
+el.addEventListener('click',function(){push(el.classList.contains('expanded')?'card_collapse':'card_expand',{card:el.dataset.card})});
+});
+document.querySelectorAll('[data-cta]').forEach(function(el){
+el.addEventListener('click',function(){push('cta_click',{cta:el.dataset.cta})});
+});
+})();
+</script>
+
+</body>
+</html>

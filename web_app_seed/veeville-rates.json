@@ -1,0 +1,726 @@
+{
+  "version": "2026-Q2",
+  "currency": "INR",
+  "agency": {
+    "name": "Veeville Technologies",
+    "tagline": "Design & Technology Studio",
+    "location": "Bangalore, India",
+    "website": "veeville.com"
+  },
+
+  "offerings": {
+
+    "01_brand_identity": {
+      "name": "Brand Identity",
+      "code": "BI",
+      "packages": {
+        "bi_logo_design": {
+          "base": 150000,
+          "description": "Logo design with full production-ready file suite",
+          "includes": "3 concepts, 2 revision rounds, vector + raster + mono + reverse + favicon + social avatar, 12+ file formats",
+          "typical_hours": 30,
+          "deliverable_count": 1
+        },
+        "bi_visual_identity_system": {
+          "base": 350000,
+          "description": "Complete visual identity system: logo, colour palette, typography, photography direction, iconography, pattern library",
+          "includes": "3 concepts, 2 revision rounds, master brand board, all production-ready files",
+          "typical_hours": 70,
+          "deliverable_count": 1
+        },
+        "bi_brand_guidelines": {
+          "base": 200000,
+          "description": "40-60 page brand guideline document with usage rules, do/don't examples, layout grids",
+          "includes": "Print + digital guidelines, editable template files, 2 revision rounds",
+          "typical_hours": 45,
+          "deliverable_count": 1
+        },
+        "bi_brand_architecture": {
+          "base": 250000,
+          "description": "Multi-brand or sub-brand architecture: hierarchy definition, naming system, visual relationship mapping",
+          "includes": "Architecture framework, naming options, visual relationship guide",
+          "typical_hours": 50,
+          "deliverable_count": 1
+        },
+        "bi_naming": {
+          "base": 120000,
+          "description": "Brand or product naming: strategic naming, shortlisting, trademark screening guidance",
+          "includes": "50+ name candidates, shortlist of 10, rationale document, basic trademark check",
+          "typical_hours": 25,
+          "deliverable_count": 1
+        },
+        "bi_full_rebrand": {
+          "base": 600000,
+          "description": "End-to-end rebrand: strategy, naming, logo, visual identity, guidelines, rollout plan",
+          "includes": "Discovery workshop, brand strategy, naming, logo (3 concepts), full identity system, 60-page guidelines, rollout checklist",
+          "typical_hours": 120,
+          "deliverable_count": 1
+        }
+      }
+    },
+
+    "02_communication_design": {
+      "name": "Communication Design",
+      "code": "CD",
+      "packages": {
+        "cd_brochure": {
+          "base": 60000,
+          "description": "Corporate or product brochure (8-16 pages), print-ready",
+          "includes": "3 concepts, 2 revision rounds, print-ready PDF + source files",
+          "typical_hours": 15,
+          "deliverable_count": 1
+        },
+        "cd_annual_report": {
+          "base": 400000,
+          "description": "Annual report design (60-120 pages): editorial planning, data visualisation, layout, print coordination",
+          "includes": "Content architecture, infographic design, 2 revision rounds, print-ready files",
+          "typical_hours": 80,
+          "deliverable_count": 1
+        },
+        "cd_presentation_template": {
+          "base": 60000,
+          "description": "PowerPoint/Keynote master template with 15+ slide layouts",
+          "includes": "3 concepts, icon library, chart styles, editable source file",
+          "typical_hours": 12,
+          "deliverable_count": 1
+        },
+        "cd_presentation_custom": {
+          "base": 150000,
+          "description": "Custom presentation design (30-50 slides), fully designed, speaker-ready",
+          "includes": "Content structuring, visual design, data visualisation, animations, speaker notes",
+          "typical_hours": 30,
+          "deliverable_count": 1
+        },
+        "cd_infographic": {
+          "base": 40000,
+          "description": "Single infographic (print or digital), data-driven visual storytelling",
+          "includes": "3 concepts, 2 revision rounds, print + digital formats",
+          "typical_hours": 10,
+          "deliverable_count": 1
+        },
+        "cd_editorial_design": {
+          "base": 80000,
+          "description": "Newsletter, magazine, or editorial layout (per issue, 8-20 pages)",
+          "includes": "Layout design, typography, 2 revision rounds, print-ready files",
+          "typical_hours": 18,
+          "deliverable_count": 1
+        },
+        "cd_campaign_collateral_set": {
+          "base": 120000,
+          "description": "Campaign collateral bundle: posters, standees, banners, invitations, emailers (5-8 items)",
+          "includes": "3 concepts per item, 2 revision rounds, print + digital formats",
+          "typical_hours": 28,
+          "deliverable_count": 5
+        },
+        "cd_print_ad": {
+          "base": 50000,
+          "description": "Single print advertisement design (newspaper, magazine)",
+          "includes": "3 concepts, 2 revision rounds, print-ready files in required sizes",
+          "typical_hours": 10,
+          "deliverable_count": 1
+        }
+      }
+    },
+
+    "03_digital": {
+      "name": "Digital",
+      "code": "DG",
+      "packages": {
+        "dg_website_corporate": {
+          "base": 500000,
+          "description": "Corporate website (10-20 pages): UX/UI design + responsive development + CMS",
+          "includes": "UX wireframes, UI design (3 concepts for homepage), development, CMS setup, mobile responsive, basic SEO",
+          "typical_hours": 100,
+          "deliverable_count": 1
+        },
+        "dg_website_enterprise": {
+          "base": 1000000,
+          "description": "Enterprise website (20+ pages): UX research, UI design, development, advanced CMS, integrations",
+          "includes": "UX research, wireframes, UI design, development, CMS, API integrations, testing, deployment",
+          "typical_hours": 200,
+          "deliverable_count": 1
+        },
+        "dg_microsite": {
+          "base": 250000,
+          "description": "Campaign microsite or landing page (3-5 pages), responsive, analytics-tracked",
+          "includes": "Design, development, hosting setup, analytics, 2 revision rounds",
+          "typical_hours": 50,
+          "deliverable_count": 1
+        },
+        "dg_landing_page": {
+          "base": 80000,
+          "description": "Single landing page: conversion-optimised, responsive, A/B test ready",
+          "includes": "3 concepts, development, mobile responsive, form integration",
+          "typical_hours": 16,
+          "deliverable_count": 1
+        },
+        "dg_app_ui_design": {
+          "base": 400000,
+          "description": "Mobile or web app UI/UX design (20-40 screens)",
+          "includes": "User flows, wireframes, UI design, interactive prototype (Figma), design system",
+          "typical_hours": 80,
+          "deliverable_count": 1
+        },
+        "dg_social_media_batch_10": {
+          "base": 60000,
+          "description": "10 social media creatives: statics, carousels, or reels (design only)",
+          "includes": "3 concepts per post, copy, hashtags, platform-optimised dimensions",
+          "typical_hours": 16,
+          "deliverable_count": 10
+        },
+        "dg_social_media_batch_25": {
+          "base": 120000,
+          "description": "25 social media creatives: campaign series with content calendar",
+          "includes": "3 concepts per post, copy, hashtags, scheduling calendar, platform formats",
+          "typical_hours": 35,
+          "deliverable_count": 25
+        },
+        "dg_social_media_retainer": {
+          "base": 200000,
+          "description": "Monthly social media retainer: strategy, content creation, community management",
+          "includes": "Content strategy, 20 posts/month, community management, monthly report",
+          "typical_hours": 50,
+          "deliverable_count": 20
+        },
+        "dg_digital_campaign": {
+          "base": 300000,
+          "description": "End-to-end digital campaign: strategy, creatives, landing page, email, social, paid media planning",
+          "includes": "Campaign strategy, all creatives (3 options), landing page, email templates, social kit, media plan",
+          "typical_hours": 60,
+          "deliverable_count": 1
+        },
+        "dg_banner_set": {
+          "base": 40000,
+          "description": "Digital banner set (6-8 sizes) for display advertising or internal digital screens",
+          "includes": "3 concepts, all standard IAB sizes, animated versions (optional), source files",
+          "typical_hours": 8,
+          "deliverable_count": 8
+        },
+        "dg_email_template": {
+          "base": 35000,
+          "description": "Single responsive HTML email template",
+          "includes": "3 concepts, responsive HTML build, tested across Outlook/Gmail/Apple Mail",
+          "typical_hours": 10,
+          "deliverable_count": 1
+        },
+        "dg_ai_microsite": {
+          "base": 1200000,
+          "description": "AI-enabled interactive microsite: RAG-powered chatbot + interactive features + hosting",
+          "includes": "AI pipeline, conversational UI, interactive elements, responsive, 12-month hosting",
+          "typical_hours": 240,
+          "deliverable_count": 1
+        }
+      }
+    },
+
+    "04_film_motion": {
+      "name": "Film & Motion Graphics",
+      "code": "FM",
+      "packages": {
+        "fm_corporate_film_basic": {
+          "base": 150000,
+          "description": "Corporate film (2-3 min): single location, 1-camera, teleprompter, basic edit",
+          "includes": "Script, shoot (1 day), edit, licensed music, 1 revision round",
+          "typical_hours": 30,
+          "deliverable_count": 1
+        },
+        "fm_corporate_film_premium": {
+          "base": 500000,
+          "description": "Corporate/brand film (3-5 min): multi-location, 2-camera, cinematic, motion graphics",
+          "includes": "Scriptwriting, storyboard, 2-day shoot, colour grading, sound design, licensed music, motion graphics",
+          "typical_hours": 80,
+          "deliverable_count": 1
+        },
+        "fm_brand_film": {
+          "base": 800000,
+          "description": "Hero brand film (2-3 min): cinematic production, concept development, professional talent, full post",
+          "includes": "Concept, script, casting, 3-day shoot, full post-production, colour grade, sound mix, music licensing",
+          "typical_hours": 140,
+          "deliverable_count": 1
+        },
+        "fm_explainer_video": {
+          "base": 120000,
+          "description": "Explainer video (60-90 sec): animated or live-action, concept to delivery",
+          "includes": "Script, storyboard, animation/shoot, voiceover, edit, 2 revision rounds",
+          "typical_hours": 25,
+          "deliverable_count": 1
+        },
+        "fm_documentary_episode": {
+          "base": 500000,
+          "description": "Documentary episode (5-8 min): research, interviews, multi-location, full post",
+          "includes": "Research, interview scripting, shoot, edit, motion graphics, colour grade, sound design",
+          "typical_hours": 100,
+          "deliverable_count": 1
+        },
+        "fm_social_reel": {
+          "base": 30000,
+          "description": "Single social reel/short video (15-60 sec): shoot or animation + edit",
+          "includes": "Concept, shoot/animation, edit, music, platform-optimised formats",
+          "typical_hours": 6,
+          "deliverable_count": 1
+        },
+        "fm_social_reel_batch_10": {
+          "base": 200000,
+          "description": "10 social reels (batch production): template-driven for efficiency",
+          "includes": "Concept framework, batch shoot/animation, edits, music, all platform formats",
+          "typical_hours": 40,
+          "deliverable_count": 10
+        },
+        "fm_motion_graphics": {
+          "base": 80000,
+          "description": "Motion graphics piece (30-60 sec): 2D/3D animation, kinetic typography",
+          "includes": "Concept, storyboard, animation, sound design, 2 revision rounds",
+          "typical_hours": 16,
+          "deliverable_count": 1
+        },
+        "fm_animation_2d": {
+          "base": 150000,
+          "description": "2D animation (60-120 sec): character animation, illustrated style",
+          "includes": "Script, storyboard, character design, animation, voiceover, sound design",
+          "typical_hours": 35,
+          "deliverable_count": 1
+        },
+        "fm_animation_3d": {
+          "base": 300000,
+          "description": "3D animation (30-60 sec): product visualisation, architectural, or character",
+          "includes": "Modelling, texturing, lighting, animation, rendering, compositing",
+          "typical_hours": 60,
+          "deliverable_count": 1
+        },
+        "fm_event_highlight_reel": {
+          "base": 200000,
+          "description": "Event filming + same-day edit (3-5 min) + extended recap (8-10 min)",
+          "includes": "2-camera crew, on-site edit suite, same-day cut, extended version within 48 hours",
+          "typical_hours": 40,
+          "deliverable_count": 2
+        }
+      }
+    },
+
+    "05_learning_development": {
+      "name": "Learning & Development",
+      "code": "LD",
+      "packages": {
+        "ld_elearning_module": {
+          "base": 150000,
+          "description": "Single e-learning module (15-30 min): instructional design, visual design, interactivity",
+          "includes": "Content structuring, storyboard, visual design, interactive elements, SCORM-compliant output",
+          "typical_hours": 35,
+          "deliverable_count": 1
+        },
+        "ld_training_course": {
+          "base": 500000,
+          "description": "Multi-module training course (5-8 modules): full instructional design, assessment, certification",
+          "includes": "Needs analysis, ID framework, 5-8 modules, assessments, certificate design, LMS upload",
+          "typical_hours": 100,
+          "deliverable_count": 8
+        },
+        "ld_lms_content_design": {
+          "base": 300000,
+          "description": "LMS content design and migration: structure, visual templates, content formatting",
+          "includes": "Content audit, LMS template design, content formatting (up to 20 modules), testing",
+          "typical_hours": 60,
+          "deliverable_count": 20
+        }
+      }
+    },
+
+    "06_sound_design": {
+      "name": "Sound Design",
+      "code": "SD",
+      "packages": {
+        "sd_audio_branding": {
+          "base": 200000,
+          "description": "Audio brand identity: sonic logo, brand anthem, hold music, notification sounds",
+          "includes": "Brand sound strategy, sonic logo (3 concepts), brand anthem, 5 UI/notification sounds, usage guidelines",
+          "typical_hours": 40,
+          "deliverable_count": 1
+        },
+        "sd_jingle": {
+          "base": 80000,
+          "description": "Jingle or brand anthem (30-60 sec): composition, production, mastering",
+          "includes": "3 concepts, full production, mastering, multiple format exports",
+          "typical_hours": 16,
+          "deliverable_count": 1
+        },
+        "sd_podcast_production": {
+          "base": 50000,
+          "description": "Podcast episode production: editing, sound design, mixing, mastering (per episode)",
+          "includes": "Editing, noise reduction, music bed, intro/outro, mixing, mastering, distribution-ready files",
+          "typical_hours": 10,
+          "deliverable_count": 1
+        },
+        "sd_podcast_launch": {
+          "base": 200000,
+          "description": "Podcast launch package: branding, intro/outro, first 4 episodes, distribution setup",
+          "includes": "Podcast branding (cover art, intro/outro music), 4 episodes produced, distribution setup",
+          "typical_hours": 40,
+          "deliverable_count": 4
+        }
+      }
+    },
+
+    "07_human_capital": {
+      "name": "Human Capital Management",
+      "code": "HC",
+      "packages": {
+        "hc_employer_branding": {
+          "base": 400000,
+          "description": "Employer brand development: EVP, visual identity, careers page, recruitment collateral",
+          "includes": "EVP workshop, employer brand identity, careers page design, recruitment collateral set, social templates",
+          "typical_hours": 80,
+          "deliverable_count": 1
+        },
+        "hc_internal_comms_campaign": {
+          "base": 150000,
+          "description": "Internal communications campaign: strategy, creatives, channel plan, amplification",
+          "includes": "Comms strategy, creative production (3 options), channel plan, amplification ideas, measurement framework",
+          "typical_hours": 30,
+          "deliverable_count": 1
+        },
+        "hc_hr_comms_suite": {
+          "base": 250000,
+          "description": "HR communications design suite: offer letters, onboarding kit, policy documents, intranet templates",
+          "includes": "Template design for 10+ HR document types, brand-aligned, editable source files",
+          "typical_hours": 50,
+          "deliverable_count": 10
+        }
+      }
+    },
+
+    "08_design_consulting": {
+      "name": "Design Consulting",
+      "code": "DC",
+      "packages": {
+        "dc_design_audit": {
+          "base": 200000,
+          "description": "Comprehensive brand/design audit: visual identity, communications, digital presence, competitor analysis",
+          "includes": "Visual audit report (40-60 pages), competitor benchmarking, gap analysis, priority recommendations",
+          "typical_hours": 40,
+          "deliverable_count": 1
+        },
+        "dc_creative_strategy": {
+          "base": 300000,
+          "description": "Creative strategy development: positioning, messaging framework, creative direction, campaign planning",
+          "includes": "Discovery workshop, positioning statement, messaging matrix, creative brief, campaign roadmap",
+          "typical_hours": 60,
+          "deliverable_count": 1
+        },
+        "dc_design_system": {
+          "base": 500000,
+          "description": "Design system: component library, design tokens, documentation, governance framework",
+          "includes": "Audit, component library (Figma), token system, documentation, governance guide, team training",
+          "typical_hours": 100,
+          "deliverable_count": 1
+        }
+      }
+    },
+
+    "09_experience_design": {
+      "name": "Experience Design",
+      "code": "XD",
+      "packages": {
+        "xd_ux_research": {
+          "base": 250000,
+          "description": "UX research programme: user interviews, surveys, usability testing, insights report",
+          "includes": "Research plan, 10-15 user interviews, survey design, usability tests, insights report with recommendations",
+          "typical_hours": 50,
+          "deliverable_count": 1
+        },
+        "xd_customer_journey_map": {
+          "base": 150000,
+          "description": "Customer journey mapping: current state, pain points, opportunity identification, future state",
+          "includes": "Stakeholder interviews, current state map, pain point analysis, future state map, opportunity backlog",
+          "typical_hours": 30,
+          "deliverable_count": 1
+        },
+        "xd_service_design": {
+          "base": 400000,
+          "description": "Service design: blueprint, touchpoint mapping, process redesign, implementation roadmap",
+          "includes": "Service blueprint, touchpoint audit, process redesign, prototype, implementation plan",
+          "typical_hours": 80,
+          "deliverable_count": 1
+        },
+        "xd_interaction_design": {
+          "base": 200000,
+          "description": "Interaction design: micro-interactions, animation specifications, interactive prototypes",
+          "includes": "Interaction audit, micro-interaction design, animation specs, interactive Figma prototype",
+          "typical_hours": 40,
+          "deliverable_count": 1
+        }
+      }
+    },
+
+    "10_technology_design": {
+      "name": "Technology Design",
+      "code": "TD",
+      "packages": {
+        "td_product_design": {
+          "base": 500000,
+          "description": "Digital product design: research, UX, UI, prototyping, design system, developer handoff",
+          "includes": "User research, information architecture, wireframes, UI design, interactive prototype, design specs",
+          "typical_hours": 100,
+          "deliverable_count": 1
+        },
+        "td_tech_interface": {
+          "base": 300000,
+          "description": "Technology interface design: dashboard, control panel, admin console, data visualisation",
+          "includes": "UX audit, wireframes, UI design, data viz components, interactive prototype",
+          "typical_hours": 60,
+          "deliverable_count": 1
+        },
+        "td_digital_platform": {
+          "base": 1500000,
+          "description": "Digital platform design + development: SaaS, marketplace, or enterprise platform",
+          "includes": "Product strategy, UX/UI design, frontend + backend development, testing, deployment, 3-month support",
+          "typical_hours": 300,
+          "deliverable_count": 1
+        },
+        "td_prototype": {
+          "base": 150000,
+          "description": "High-fidelity interactive prototype: clickable, testable, presentation-ready",
+          "includes": "Figma or code prototype, all key flows, responsive, shareable link",
+          "typical_hours": 30,
+          "deliverable_count": 1
+        }
+      }
+    },
+
+    "11_package_design": {
+      "name": "Package Design",
+      "code": "PD",
+      "packages": {
+        "pd_product_packaging": {
+          "base": 120000,
+          "description": "Product packaging design: single SKU, all panels, print-ready",
+          "includes": "3 concepts, structural dieline, all panel artwork, print-ready files, 2 revision rounds",
+          "typical_hours": 25,
+          "deliverable_count": 1
+        },
+        "pd_label_design": {
+          "base": 60000,
+          "description": "Product label design: single SKU, regulatory compliance, print-ready",
+          "includes": "3 concepts, regulatory layout, print-ready files, 2 revision rounds",
+          "typical_hours": 12,
+          "deliverable_count": 1
+        },
+        "pd_packaging_system": {
+          "base": 400000,
+          "description": "Packaging system: 5-10 SKUs, brand architecture across range, structural design",
+          "includes": "Range architecture, dieline development, artwork for 5-10 SKUs, print specs, vendor coordination",
+          "typical_hours": 80,
+          "deliverable_count": 10
+        }
+      }
+    },
+
+    "12_exhibition_design": {
+      "name": "Exhibition Design",
+      "code": "EX",
+      "packages": {
+        "ex_trade_show_booth": {
+          "base": 300000,
+          "description": "Trade show booth design: 3D concept, graphics, production drawings (design only, fabrication separate)",
+          "includes": "3D concept (3 options), graphic design, production drawings, lighting plan, vendor brief",
+          "typical_hours": 60,
+          "deliverable_count": 1
+        },
+        "ex_pop_up_retail": {
+          "base": 200000,
+          "description": "Pop-up or retail environment design: concept, graphics, spatial layout",
+          "includes": "Concept (3 options), spatial layout, graphic design, production drawings, material specs",
+          "typical_hours": 40,
+          "deliverable_count": 1
+        },
+        "ex_installation": {
+          "base": 500000,
+          "description": "Museum/gallery installation or immersive experience: concept through production support",
+          "includes": "Concept development, spatial design, content design, technical specs, production coordination",
+          "typical_hours": 100,
+          "deliverable_count": 1
+        }
+      }
+    },
+
+    "13_employee_engagement": {
+      "name": "Employee Engagement",
+      "code": "EE",
+      "packages": {
+        "ee_internal_campaign": {
+          "base": 150000,
+          "description": "Internal engagement campaign: concept, creatives, comms plan, amplification strategy",
+          "includes": "Campaign concept, creative production (3 options), channel plan, amplification ideas, measurement framework",
+          "typical_hours": 30,
+          "deliverable_count": 1
+        },
+        "ee_townhall_package": {
+          "base": 300000,
+          "description": "Townhall creative package: presentation, video, content, comms plan, AV assets",
+          "includes": "CEO/leadership deck, milestone video, panel format, branded AV assets, post-event content",
+          "typical_hours": 60,
+          "deliverable_count": 1
+        },
+        "ee_recognition_programme": {
+          "base": 200000,
+          "description": "Recognition programme design: framework, visual identity, certificates, digital platform",
+          "includes": "Programme framework, visual identity, certificate templates, nomination forms, announcement templates",
+          "typical_hours": 40,
+          "deliverable_count": 1
+        },
+        "ee_culture_comms": {
+          "base": 100000,
+          "description": "Culture communications: values rollout, culture deck, posters, digital assets",
+          "includes": "Values visual system, culture deck, poster series (5), digital wallpapers, screensavers",
+          "typical_hours": 20,
+          "deliverable_count": 1
+        },
+        "ee_anniversary_campaign": {
+          "base": 800000,
+          "description": "Milestone anniversary campaign: theme, identity, phased rollout, activations, event creative",
+          "includes": "Strategic theme, visual identity, 4-phase comms plan, 5+ activation concepts, event creative, merchandise design",
+          "typical_hours": 160,
+          "deliverable_count": 1
+        },
+        "ee_comms_retainer_monthly": {
+          "base": 350000,
+          "description": "Monthly IC creative retainer: dedicated designer + copywriter + PM (~120 hours/month)",
+          "includes": "Project management, design production, copywriting, 3 options per deliverable",
+          "typical_hours": 120,
+          "deliverable_count": 1
+        }
+      }
+    },
+
+    "14_environment_graphics": {
+      "name": "Environment Graphics",
+      "code": "EG",
+      "packages": {
+        "eg_office_branding": {
+          "base": 300000,
+          "description": "Office branding: reception, meeting rooms, common areas, lift lobbies (design + production drawings)",
+          "includes": "Site survey, concept (3 options), all artwork, production drawings, material specs, vendor brief",
+          "typical_hours": 60,
+          "deliverable_count": 1
+        },
+        "eg_wayfinding": {
+          "base": 200000,
+          "description": "Wayfinding and signage system: navigation strategy, sign hierarchy, design, specs",
+          "includes": "Navigation audit, sign hierarchy, icon system, design, fabrication specs, placement plan",
+          "typical_hours": 40,
+          "deliverable_count": 1
+        },
+        "eg_campus_branding": {
+          "base": 500000,
+          "description": "Campus-wide branding: multi-building, exterior + interior, signage + graphics + murals",
+          "includes": "Campus audit, brand zoning plan, all graphic designs, mural concepts, signage system, production specs",
+          "typical_hours": 100,
+          "deliverable_count": 1
+        },
+        "eg_wall_graphics": {
+          "base": 80000,
+          "description": "Wall graphics / murals: single wall or feature area, concept through production-ready artwork",
+          "includes": "3 concepts, scaled artwork, production-ready files, installation specs",
+          "typical_hours": 16,
+          "deliverable_count": 1
+        }
+      }
+    },
+
+    "15_experiences_by_veeville": {
+      "name": "Experiences by Veeville",
+      "code": "XV",
+      "packages": {
+        "xv_action_experience": {
+          "base": 300000,
+          "description": "Action Experience: experiential learning program for leaders and teams to solve real business problems",
+          "includes": "Programme design, facilitation, materials, 1-day workshop for up to 30 participants",
+          "typical_hours": 60,
+          "deliverable_count": 1
+        },
+        "xv_dudeldopp": {
+          "base": 250000,
+          "description": "Dudeldopp: creative problem-solving workshop using design thinking methodology",
+          "includes": "Programme design, facilitation, toolkit, 1-day workshop for up to 25 participants",
+          "typical_hours": 50,
+          "deliverable_count": 1
+        },
+        "xv_write_brain": {
+          "base": 200000,
+          "description": "Write Brain: storytelling and communication skills workshop for professionals",
+          "includes": "Programme design, facilitation, materials, half-day or full-day workshop",
+          "typical_hours": 40,
+          "deliverable_count": 1
+        },
+        "xv_aislempix": {
+          "base": 250000,
+          "description": "Aislempix: team-based competitive experience combining strategy, creativity, and collaboration",
+          "includes": "Programme design, facilitation, scoring system, materials, half-day event for up to 50 participants",
+          "typical_hours": 50,
+          "deliverable_count": 1
+        },
+        "xv_brown_box": {
+          "base": 200000,
+          "description": "Brown Box: innovation sprint workshop using constraints-based creative methodology",
+          "includes": "Programme design, facilitation, prototype materials, 1-day workshop",
+          "typical_hours": 40,
+          "deliverable_count": 1
+        },
+        "xv_custom_experience": {
+          "base": 400000,
+          "description": "Custom experiential programme: bespoke design for specific business challenge or team objective",
+          "includes": "Needs analysis, programme design, facilitation, materials, 1-2 day engagement, post-programme report",
+          "typical_hours": 80,
+          "deliverable_count": 1
+        }
+      }
+    }
+  },
+
+  "hourly_rates": {
+    "project_director": 8000,
+    "creative_director": 6000,
+    "senior_designer": 4000,
+    "designer": 3000,
+    "motion_designer": 4500,
+    "3d_artist": 5000,
+    "copywriter": 3500,
+    "web_developer": 5000,
+    "video_producer": 5500,
+    "sound_engineer": 4000,
+    "ux_researcher": 5000,
+    "instructional_designer": 4000,
+    "event_coordinator": 3000,
+    "facilitator": 6000
+  },
+
+  "multipliers": {
+    "urgency_rush": { "value": 1.5, "description": "Timeline compressed to <50% of standard" },
+    "urgency_tight": { "value": 1.2, "description": "Timeline compressed to 50-75% of standard" },
+    "complexity_high": { "value": 1.3, "description": "Unusual technical requirements, multiple stakeholder groups" },
+    "complexity_enterprise": { "value": 1.5, "description": "Fortune 500 / enterprise client with complex approval processes" },
+    "multi_theme": { "value": 0.7, "description": "Per additional theme beyond the first (theme-specific items only)" },
+    "multi_language": { "value": 0.5, "description": "Per additional language version (adaptation, not retranslation)" },
+    "annual_bundle": { "value": 0.88, "description": "12% discount for annual engagement commitment" },
+    "half_year_bundle": { "value": 0.93, "description": "7% discount for 6-month engagement commitment" },
+    "existing_client": { "value": 0.95, "description": "5% loyalty discount for returning clients" },
+    "batch_production": { "value": 0.6, "description": "Template-driven batch production after initial creative development" }
+  },
+
+  "pass_through_markup": 0.10,
+  "standard_options_per_deliverable": 3,
+  "standard_revision_rounds": 2,
+  "gst_rate": 0.18,
+
+  "payment_terms": {
+    "default": "Net 15 days from invoice date",
+    "milestone_schedule": {
+      "advance": 0.20,
+      "mid_project": 0.50,
+      "completion": 0.30
+    },
+    "retainer_schedule": "Monthly in advance, invoiced 1st of each month"
+  },
+
+  "proposal_validity_days": 30,
+  "ip_transfer": "All creative IP transfers to client upon full payment for that deliverable"
+}

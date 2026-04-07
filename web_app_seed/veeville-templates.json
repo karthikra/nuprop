@@ -1,0 +1,571 @@
+{
+  "version": "2026-Q2",
+  "templates": [
+    {
+      "id": "brand-identity-rebrand",
+      "name": "Brand Identity / Rebrand",
+      "description": "For pitching brand identity, visual refresh, or rebrand projects",
+      "category": "brand",
+
+      "brief_intake": {
+        "required_questions": [
+          "What's the trigger for the rebrand — merger, new leadership, repositioning, growth, or something else?",
+          "Which brand elements are in scope — logo only, full identity system, guidelines, collateral rollout?",
+          "Is there an existing brand book or visual identity we should reference or depart from?",
+          "Who are their top 3 competitors visually? What do they admire or want to avoid?",
+          "Any sacred cows — elements they absolutely want to keep?"
+        ],
+        "optional_questions": [
+          "How many sub-brands or product brands need to be considered?",
+          "Is naming in scope or is the name fixed?",
+          "Do they need environment graphics or packaging as part of this?"
+        ],
+        "auto_detect_signals": ["rebrand", "brand identity", "visual refresh", "logo redesign", "brand guidelines", "visual identity", "brand architecture", "naming"]
+      },
+
+      "research": {
+        "client_queries": [
+          "{client} brand identity",
+          "{client} competitors branding {industry}",
+          "{client} recent news leadership 2026"
+        ],
+        "benchmark_queries": [
+          "brand identity cost {country} agency {year}",
+          "rebrand cost agency {country}",
+          "logo design cost {country} agency"
+        ],
+        "benchmark_categories": ["bi_visual_identity_system", "bi_logo_design", "bi_brand_guidelines"]
+      },
+
+      "cost_model": {
+        "typical_deliverables": [
+          "bi_full_rebrand",
+          "bi_visual_identity_system",
+          "bi_logo_design",
+          "bi_brand_guidelines",
+          "bi_brand_architecture",
+          "bi_naming",
+          "cd_presentation_template",
+          "dg_social_media_batch_10",
+          "cd_campaign_collateral_set"
+        ],
+        "default_multipliers": ["complexity_high"],
+        "pricing_framing": "investment_roi",
+        "pricing_anchor_text": "Frame against revenue impact of stronger brand recognition. Studies show branded companies grow 3-4× faster. Compare total investment against a single year's marketing spend."
+      },
+
+      "narrative": {
+        "letter_strategy": "confident",
+        "letter_opening_instruction": "Start with the client's current brand perception problem — what's not working and why. Reference a specific competitor who's executing their brand better. Position the rebrand as a strategic weapon, not a cosmetic exercise.",
+        "letter_tone_words": ["bold", "strategic", "transformative", "clear-eyed"],
+        "letter_avoid_words": ["refresh", "facelift", "update", "tweak"],
+        "scope_detail_level": "detailed",
+        "rationale_depth": "standard"
+      },
+
+      "output": {
+        "site_theme": "bold",
+        "sections_include": ["letter", "credentials", "scope", "investment", "timeline", "team", "cta"],
+        "sections_skip": ["demo", "rationale"],
+        "suggested_formats": ["site", "docx", "pdf"],
+        "demo_embed_eligible": false
+      }
+    },
+
+    {
+      "id": "website-digital-platform",
+      "name": "Website / Digital Platform",
+      "description": "For pitching website redesigns, app design, microsites, or digital platform projects",
+      "category": "technology",
+
+      "brief_intake": {
+        "required_questions": [
+          "What's wrong with the current site/platform — design, performance, conversion, CMS, or all of the above?",
+          "What's the page count and content volume? Do they have content ready or does it need to be created?",
+          "Do they need CMS, e-commerce, integrations with existing systems, or a custom build?",
+          "Who's the target audience and what's the primary action they should take on the site?",
+          "Is this design-only or design + development?"
+        ],
+        "optional_questions": [
+          "What's their current tech stack?",
+          "Do they need ongoing maintenance after launch?",
+          "Are there accessibility or compliance requirements?"
+        ],
+        "auto_detect_signals": ["website", "redesign", "web", "homepage", "landing page", "site refresh", "app design", "UI/UX", "platform", "microsite", "digital"]
+      },
+
+      "research": {
+        "client_queries": [
+          "{client} website",
+          "{client} digital presence",
+          "{client} competitors website {industry}"
+        ],
+        "benchmark_queries": [
+          "website redesign cost {country} agency {year}",
+          "corporate website development cost {country}",
+          "app UI/UX design cost {country} agency"
+        ],
+        "benchmark_categories": ["dg_website_corporate", "dg_website_enterprise", "dg_app_ui_design"]
+      },
+
+      "cost_model": {
+        "typical_deliverables": [
+          "dg_website_corporate",
+          "dg_website_enterprise",
+          "dg_microsite",
+          "dg_landing_page",
+          "dg_app_ui_design",
+          "xd_ux_research",
+          "xd_customer_journey_map",
+          "cd_presentation_template",
+          "dg_social_media_batch_10"
+        ],
+        "default_multipliers": ["complexity_high"],
+        "pricing_framing": "cost_comparison",
+        "pricing_anchor_text": "Compare against cost of building an internal team (designer + developer × N months) vs. our fixed-price delivery with defined scope and timeline."
+      },
+
+      "narrative": {
+        "letter_strategy": "research_heavy",
+        "letter_opening_instruction": "Open with a specific observation about their current website — a performance issue, a UX problem, a missed conversion opportunity, or a competitor doing it better. Show you've looked at their site before writing a word.",
+        "letter_tone_words": ["analytical", "precise", "solution-oriented", "evidence-based"],
+        "letter_avoid_words": ["beautiful", "stunning", "sleek"],
+        "scope_detail_level": "detailed",
+        "rationale_depth": "standard"
+      },
+
+      "output": {
+        "site_theme": "minimal",
+        "sections_include": ["letter", "credentials", "scope", "investment", "timeline", "team", "demo", "cta"],
+        "sections_skip": [],
+        "suggested_formats": ["site", "docx", "pdf"],
+        "demo_embed_eligible": true
+      }
+    },
+
+    {
+      "id": "anniversary-milestone-campaign",
+      "name": "Corporate Campaign — Anniversary / Milestone",
+      "description": "For pitching anniversary campaigns, milestone celebrations, large-scale IC campaigns",
+      "category": "campaign",
+
+      "brief_intake": {
+        "required_questions": [
+          "What's the milestone — anniversary, founding, IPO, acquisition, or other?",
+          "Is this internal-facing, external-facing, or both?",
+          "What channels are in scope — email, intranet, social, events, press, OOH?",
+          "Is there a flagship event planned?",
+          "Are there existing brand guidelines we need to work within?"
+        ],
+        "optional_questions": [
+          "How many offices/locations need to be involved?",
+          "Is there a CEO message or leadership involvement expected?",
+          "Do they want merchandise?"
+        ],
+        "auto_detect_signals": ["anniversary", "milestone", "celebration", "campaign", "25th", "50th", "founding", "silver jubilee", "golden jubilee", "centenary"]
+      },
+
+      "research": {
+        "client_queries": [
+          "{client} history founding milestones",
+          "{client} CEO leadership {year}",
+          "{client} recent news awards {year}"
+        ],
+        "benchmark_queries": [
+          "corporate anniversary campaign agency cost {country}",
+          "corporate event management pricing {country}",
+          "corporate video production cost {country}",
+          "creative agency retainer pricing {country} {year}"
+        ],
+        "benchmark_categories": ["ee_anniversary_campaign", "fm_corporate_film_premium", "dg_ai_microsite", "ee_comms_retainer_monthly"]
+      },
+
+      "cost_model": {
+        "typical_deliverables": [
+          "ee_anniversary_campaign",
+          "bi_visual_identity_system",
+          "bi_brand_guidelines",
+          "dg_email_template",
+          "dg_social_media_batch_25",
+          "dg_ai_microsite",
+          "dg_microsite",
+          "fm_corporate_film_premium",
+          "fm_documentary_episode",
+          "fm_social_reel_batch_10",
+          "fm_event_highlight_reel",
+          "ee_townhall_package",
+          "ee_internal_campaign",
+          "ee_comms_retainer_monthly",
+          "cd_campaign_collateral_set",
+          "eg_office_branding"
+        ],
+        "default_multipliers": ["complexity_enterprise", "annual_bundle"],
+        "pricing_framing": "bundled_value",
+        "pricing_anchor_text": "Frame as year-long partnership, not project fee. Show monthly equivalent. Compare against hiring 4-6 separate specialist agencies (branding + video + event + digital + social + PR)."
+      },
+
+      "narrative": {
+        "letter_strategy": "warm",
+        "letter_opening_instruction": "Open with the client's origin story — when they were founded, what the world looked like then, what they've built since. Make them feel the weight of the milestone before talking about how to celebrate it.",
+        "letter_tone_words": ["warm", "proud", "forward-looking", "human"],
+        "letter_avoid_words": ["nostalgic", "looking back", "reminiscing"],
+        "scope_detail_level": "detailed",
+        "rationale_depth": "exhaustive"
+      },
+
+      "output": {
+        "site_theme": "editorial",
+        "sections_include": ["letter", "themes", "credentials", "scope", "investment", "rationale", "timeline", "team", "gallery", "demo", "cta"],
+        "sections_skip": [],
+        "suggested_formats": ["site", "docx", "pdf", "cost_rationale", "one_pager", "deck"],
+        "demo_embed_eligible": true
+      }
+    },
+
+    {
+      "id": "creative-retainer",
+      "name": "Creative Retainer / Ongoing Design Support",
+      "description": "For pitching monthly or annual creative retainers — ongoing design, content, and communications support",
+      "category": "retainer",
+
+      "brief_intake": {
+        "required_questions": [
+          "What ongoing creative needs do they have — design, content, video, social, all of the above?",
+          "How are they currently handling this — in-house team, freelancers, another agency, or ad hoc?",
+          "What's the volume — roughly how many deliverables per month?",
+          "What's the pain — inconsistency, speed, quality, cost, or management overhead?"
+        ],
+        "optional_questions": [
+          "Do they need a dedicated team or on-call access?",
+          "Are there seasonal peaks (annual report, events season)?",
+          "Do they have existing templates and brand guidelines?"
+        ],
+        "auto_detect_signals": ["retainer", "ongoing", "monthly", "continuous", "always-on", "on-call", "dedicated team", "creative support"]
+      },
+
+      "research": {
+        "client_queries": [
+          "{client} brand communications",
+          "{client} social media presence",
+          "{client} recent campaigns"
+        ],
+        "benchmark_queries": [
+          "creative agency retainer pricing {country} {year}",
+          "design agency monthly retainer cost {country}",
+          "social media agency retainer {country}"
+        ],
+        "benchmark_categories": ["ee_comms_retainer_monthly", "dg_social_media_retainer"]
+      },
+
+      "cost_model": {
+        "typical_deliverables": [
+          "ee_comms_retainer_monthly",
+          "dg_social_media_retainer",
+          "dg_social_media_batch_10",
+          "cd_presentation_custom",
+          "cd_campaign_collateral_set",
+          "fm_social_reel",
+          "dg_email_template",
+          "dg_banner_set"
+        ],
+        "default_multipliers": ["annual_bundle", "existing_client"],
+        "pricing_framing": "time_savings",
+        "pricing_anchor_text": "Compare monthly retainer against hourly cost of equivalent freelancer hours (3 freelancers × 40 hrs/month × avg rate) or internal headcount (salary + benefits + management overhead + tools)."
+      },
+
+      "narrative": {
+        "letter_strategy": "relationship_builder",
+        "letter_opening_instruction": "Start with their current frustration — the friction of managing multiple freelancers, the inconsistency of ad-hoc commissioning, or the overload on their internal team. Position the retainer as peace of mind and consistency, not just a service.",
+        "letter_tone_words": ["reliable", "collaborative", "consistent", "partnership"],
+        "letter_avoid_words": ["vendor", "supplier", "outsource"],
+        "scope_detail_level": "standard",
+        "rationale_depth": "standard"
+      },
+
+      "output": {
+        "site_theme": "warm",
+        "sections_include": ["letter", "credentials", "scope", "investment", "team", "cta"],
+        "sections_skip": ["demo", "gallery", "rationale"],
+        "suggested_formats": ["docx", "pdf", "one_pager"],
+        "demo_embed_eligible": false
+      }
+    },
+
+    {
+      "id": "film-video-production",
+      "name": "Film & Video Production",
+      "description": "For pitching corporate films, brand films, docu-series, video campaigns, or animation projects",
+      "category": "film",
+
+      "brief_intake": {
+        "required_questions": [
+          "What's the purpose of the video — brand awareness, internal comms, product launch, training, social?",
+          "What style — live action, animation, motion graphics, documentary, or hybrid?",
+          "What length and how many videos?",
+          "Where will it be distributed — social, website, internal, broadcast, events?"
+        ],
+        "optional_questions": [
+          "Do they have existing footage or photography we can use?",
+          "Is professional talent (actors, voiceover) needed?",
+          "Do they need multiple language versions?"
+        ],
+        "auto_detect_signals": ["video", "film", "corporate film", "brand film", "documentary", "animation", "motion graphics", "explainer", "reel"]
+      },
+
+      "research": {
+        "client_queries": [
+          "{client} brand videos",
+          "{client} YouTube channel",
+          "{client} competitors video content"
+        ],
+        "benchmark_queries": [
+          "corporate video production cost {country} {year}",
+          "brand film production cost {country}",
+          "animation production cost {country} agency"
+        ],
+        "benchmark_categories": ["fm_corporate_film_premium", "fm_brand_film", "fm_documentary_episode"]
+      },
+
+      "cost_model": {
+        "typical_deliverables": [
+          "fm_corporate_film_basic",
+          "fm_corporate_film_premium",
+          "fm_brand_film",
+          "fm_explainer_video",
+          "fm_documentary_episode",
+          "fm_social_reel_batch_10",
+          "fm_motion_graphics",
+          "fm_animation_2d",
+          "fm_animation_3d",
+          "sd_audio_branding"
+        ],
+        "default_multipliers": ["complexity_high"],
+        "pricing_framing": "market_rate",
+        "pricing_anchor_text": "Position against published Indian video production benchmarks. Emphasise end-to-end service (concept through delivery) vs. production-house model (shoot only)."
+      },
+
+      "narrative": {
+        "letter_strategy": "confident",
+        "letter_opening_instruction": "Open with what their current video presence is missing — or with a specific competitor's video that's outperforming them. Position video as the highest-ROI content format (cite engagement data).",
+        "letter_tone_words": ["cinematic", "impactful", "story-driven", "premium"],
+        "letter_avoid_words": ["content", "assets", "clips"],
+        "scope_detail_level": "detailed",
+        "rationale_depth": "standard"
+      },
+
+      "output": {
+        "site_theme": "dark",
+        "sections_include": ["letter", "credentials", "scope", "investment", "timeline", "team", "gallery", "cta"],
+        "sections_skip": ["demo"],
+        "suggested_formats": ["site", "docx", "pdf"],
+        "demo_embed_eligible": false
+      }
+    },
+
+    {
+      "id": "employer-branding-hcm",
+      "name": "Employer Branding & Internal Communications",
+      "description": "For pitching employer brand development, internal comms design, HR communications, or employee engagement programmes",
+      "category": "brand",
+
+      "brief_intake": {
+        "required_questions": [
+          "What's the objective — employer brand from scratch, EVP refresh, internal comms overhaul, or engagement programme?",
+          "What's the employee population size and geographic spread?",
+          "What channels do they use for internal comms — intranet, Teams, Slack, email, physical?",
+          "What's the current pain — talent attraction, retention, culture alignment, or comms inconsistency?"
+        ],
+        "optional_questions": [
+          "Do they have an existing EVP or employer brand?",
+          "Is there a careers page or recruitment collateral we should audit?",
+          "Are there specific campaigns coming up (townhalls, awards, festivals)?"
+        ],
+        "auto_detect_signals": ["employer brand", "EVP", "internal communications", "HR communications", "employee engagement", "talent", "employer branding", "culture", "onboarding"]
+      },
+
+      "research": {
+        "client_queries": [
+          "{client} careers page employer brand",
+          "{client} Glassdoor reviews",
+          "{client} competitors employer brand"
+        ],
+        "benchmark_queries": [
+          "employer branding agency cost {country} {year}",
+          "internal communications agency retainer {country}",
+          "employee engagement programme cost {country}"
+        ],
+        "benchmark_categories": ["hc_employer_branding", "hc_internal_comms_campaign", "ee_comms_retainer_monthly"]
+      },
+
+      "cost_model": {
+        "typical_deliverables": [
+          "hc_employer_branding",
+          "hc_internal_comms_campaign",
+          "hc_hr_comms_suite",
+          "ee_internal_campaign",
+          "ee_townhall_package",
+          "ee_recognition_programme",
+          "ee_culture_comms",
+          "dg_microsite",
+          "fm_corporate_film_basic",
+          "eg_office_branding"
+        ],
+        "default_multipliers": ["complexity_enterprise"],
+        "pricing_framing": "investment_roi",
+        "pricing_anchor_text": "Frame against cost of employee turnover. If the average replacement cost is 6-9 months' salary and employer branding reduces attrition by even 5%, the ROI is immediate."
+      },
+
+      "narrative": {
+        "letter_strategy": "warm",
+        "letter_opening_instruction": "Open with the talent market reality — competition for good people, the cost of attrition, the importance of culture as a differentiator. Reference their Glassdoor rating or a specific talent challenge in their industry.",
+        "letter_tone_words": ["human", "authentic", "culture-first", "people-centric"],
+        "letter_avoid_words": ["resources", "headcount", "workforce"],
+        "scope_detail_level": "standard",
+        "rationale_depth": "standard"
+      },
+
+      "output": {
+        "site_theme": "warm",
+        "sections_include": ["letter", "credentials", "scope", "investment", "timeline", "team", "cta"],
+        "sections_skip": ["demo", "gallery"],
+        "suggested_formats": ["docx", "pdf", "one_pager", "deck"],
+        "demo_embed_eligible": false
+      }
+    },
+
+    {
+      "id": "experiential-learning",
+      "name": "Experiences by Veeville — Experiential Learning",
+      "description": "For pitching Veeville's proprietary experiential learning programmes: Action Experience, Dudeldopp, Write Brain, Aislempix, Brown Box",
+      "category": "consulting",
+
+      "brief_intake": {
+        "required_questions": [
+          "What's the business challenge they're trying to solve — innovation, collaboration, leadership, communication, team cohesion?",
+          "Who's the audience — leadership team, mid-management, cross-functional teams, new joiners?",
+          "How many participants?",
+          "What's the format preference — half-day, full-day, multi-day?"
+        ],
+        "optional_questions": [
+          "Have they done experiential learning before? What worked/didn't?",
+          "Is this a one-off or a series across the organisation?",
+          "Do they need pre/post assessment of outcomes?"
+        ],
+        "auto_detect_signals": ["workshop", "team building", "experiential", "learning programme", "leadership development", "innovation workshop", "design thinking", "Action Experience", "Dudeldopp", "Write Brain", "Aislempix", "Brown Box"]
+      },
+
+      "research": {
+        "client_queries": [
+          "{client} culture values",
+          "{client} recent challenges transformation",
+          "{client} industry trends"
+        ],
+        "benchmark_queries": [
+          "corporate training workshop cost {country} {year}",
+          "experiential learning programme pricing {country}",
+          "design thinking workshop cost per day"
+        ],
+        "benchmark_categories": ["xv_action_experience", "xv_custom_experience"]
+      },
+
+      "cost_model": {
+        "typical_deliverables": [
+          "xv_action_experience",
+          "xv_dudeldopp",
+          "xv_write_brain",
+          "xv_aislempix",
+          "xv_brown_box",
+          "xv_custom_experience"
+        ],
+        "default_multipliers": [],
+        "pricing_framing": "investment_roi",
+        "pricing_anchor_text": "Frame against cost of a single bad decision from a misaligned leadership team, or against the productivity loss from poor cross-functional collaboration. One programme that shifts team dynamics pays for itself within a quarter."
+      },
+
+      "narrative": {
+        "letter_strategy": "confident",
+        "letter_opening_instruction": "Open with the business challenge, not the workshop. Don't sell a 'team building day' — sell the outcome: better decisions, faster innovation, stronger collaboration. Reference the specific programme that fits their need by name.",
+        "letter_tone_words": ["energising", "practical", "transformative", "hands-on"],
+        "letter_avoid_words": ["team building", "ice-breaker", "fun day", "offsite activity"],
+        "scope_detail_level": "standard",
+        "rationale_depth": "light"
+      },
+
+      "output": {
+        "site_theme": "bold",
+        "sections_include": ["letter", "scope", "investment", "team", "testimonials", "cta"],
+        "sections_skip": ["demo", "gallery", "rationale", "timeline"],
+        "suggested_formats": ["docx", "pdf", "one_pager"],
+        "demo_embed_eligible": false
+      }
+    },
+
+    {
+      "id": "exhibition-environment",
+      "name": "Exhibition / Environment Design",
+      "description": "For pitching trade show booths, office branding, campus graphics, retail environments, or installations",
+      "category": "spatial",
+
+      "brief_intake": {
+        "required_questions": [
+          "What's the space — trade show booth, office, campus, retail, museum, pop-up?",
+          "What's the square footage or booth size?",
+          "Is this design-only or do you need production/fabrication coordination?",
+          "What's the event or occupancy date?"
+        ],
+        "optional_questions": [
+          "Do they have existing brand guidelines for the space?",
+          "Is there a sustainability requirement for materials?",
+          "Do they need wayfinding/signage as part of this?"
+        ],
+        "auto_detect_signals": ["exhibition", "trade show", "booth", "office branding", "wayfinding", "signage", "campus", "environment", "pop-up", "retail environment", "installation", "mural"]
+      },
+
+      "research": {
+        "client_queries": [
+          "{client} office locations",
+          "{client} trade show presence",
+          "{client} brand environment"
+        ],
+        "benchmark_queries": [
+          "exhibition booth design cost {country} {year}",
+          "office branding cost {country}",
+          "wayfinding signage design cost"
+        ],
+        "benchmark_categories": ["ex_trade_show_booth", "eg_office_branding", "eg_campus_branding"]
+      },
+
+      "cost_model": {
+        "typical_deliverables": [
+          "ex_trade_show_booth",
+          "ex_pop_up_retail",
+          "ex_installation",
+          "eg_office_branding",
+          "eg_wayfinding",
+          "eg_campus_branding",
+          "eg_wall_graphics"
+        ],
+        "default_multipliers": ["urgency_tight"],
+        "pricing_framing": "market_rate",
+        "pricing_anchor_text": "Position against typical Indian exhibition/environment design agency rates. Emphasise that design fees are separate from fabrication/production costs (which are at actuals)."
+      },
+
+      "narrative": {
+        "letter_strategy": "confident",
+        "letter_opening_instruction": "Open with the impact of physical space on brand perception. Reference research on how workspace design affects productivity, or how booth design affects lead generation at trade shows.",
+        "letter_tone_words": ["spatial", "immersive", "tactile", "impactful"],
+        "letter_avoid_words": ["decoration", "beautification"],
+        "scope_detail_level": "detailed",
+        "rationale_depth": "light"
+      },
+
+      "output": {
+        "site_theme": "dark",
+        "sections_include": ["letter", "credentials", "scope", "investment", "timeline", "gallery", "cta"],
+        "sections_skip": ["demo", "rationale"],
+        "suggested_formats": ["docx", "pdf", "deck"],
+        "demo_embed_eligible": false
+      }
+    }
+  ]
+}

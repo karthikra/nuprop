@@ -1,0 +1,93 @@
+{# Shared macros for all proposal site themes #}
+
+{% macro head_meta(p, agency, theme) %}
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<meta name="description" content="{{ p.project_name }} — Proposal by {{ agency.name }}">
+<title>{{ p.project_name }} — {{ agency.name }}</title>
+{% endmacro %}
+
+{% macro google_fonts(heading, body) %}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family={{ heading | replace(' ', '+') }}:wght@400&family={{ body | replace(' ', '+') }}:wght@400;500;700&display=swap" rel="stylesheet">
+{% endmacro %}
+
+{% macro cost_table(cm) %}
+<table class="cost-table">
+<thead>
+<tr><th>Deliverable</th><th style="text-align:center">Qty</th><th style="text-align:right">Unit Cost</th><th style="text-align:right">Total</th></tr>
+</thead>
+<tbody>
+{% for item in cm.line_items %}
+<tr>
+<td>{{ item.deliverable }}</td>
+<td style="text-align:center">{{ item.quantity }}</td>
+<td style="text-align:right">{{ item.unit_cost | currency }}</td>
+<td style="text-align:right">{{ item.total | currency }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+<div class="cost-totals">
+<p>Subtotal: {{ cm.subtotal | currency }}</p>
+{% if cm.discount_percent > 0 %}
+<p class="discount">Discount ({{ cm.discount_percent }}%): &minus;{{ cm.discount_amount | currency }}</p>
+{% endif %}
+<p>Total (excl. GST): {{ cm.total | currency }}</p>
+<p>GST (18%): {{ cm.gst_amount | currency }}</p>
+<p class="grand-total">{{ cm.grand_total | currency }}</p>
+</div>
+{% endmacro %}
+
+{% macro tracking_script(proposal_id, endpoint) %}
+<script>
+(function(){
+var P='{{ proposal_id }}',E='{{ endpoint }}',q=[];
+function push(t,d){q.push(Object.assign({t:t,p:P,ts:Date.now()},d||{}))}
+function flush(){if(!q.length)return;try{navigator.sendBeacon(E,JSON.stringify(q))}catch(e){}q=[]}
+setInterval(flush,5000);
+document.addEventListener('visibilitychange',function(){if(document.hidden)flush()});
+window.addEventListener('pagehide',flush);
+push('page_view',{ref:document.referrer,w:innerWidth,h:innerHeight});
+var maxS=0,thresholds=[25,50,75,100],fired={};
+addEventListener('scroll',function(){
+var pct=Math.round((scrollY+innerHeight)/document.body.scrollHeight*100);
+if(pct>maxS)maxS=pct;
+thresholds.forEach(function(t){if(pct>=t&&!fired[t]){fired[t]=1;push('scroll_depth',{depth:t})}});
+},{passive:true});
+var timers={};
+var obs=new IntersectionObserver(function(entries){
+entries.forEach(function(e){
+var id=e.target.dataset.section;
+if(!id)return;
+if(e.isIntersecting){timers[id]=Date.now();push('section_enter',{section:id})}
+else if(timers[id]){push('section_exit',{section:id,duration:Math.round((Date.now()-timers[id])/1000)});delete timers[id]}
+});
+},{threshold:0.3});
+document.querySelectorAll('[data-section]').forEach(function(el){obs.observe(el)});
+document.querySelectorAll('[data-card]').forEach(function(el){
+el.addEventListener('click',function(){push(el.classList.contains('expanded')?'card_collapse':'card_expand',{card:el.dataset.card})});
+});
+document.querySelectorAll('[data-cta]').forEach(function(el){
+el.addEventListener('click',function(){push('cta_click',{cta:el.dataset.cta})});
+});
+})();
+</script>
+{% endmacro %}
+
+{% macro scroll_animations() %}
+<script>
+var aobs=new IntersectionObserver(function(entries){
+entries.forEach(function(e){
+if(e.isIntersecting){e.target.classList.add('visible');aobs.unobserve(e.target)}
+});
+},{threshold:0.1,rootMargin:'0px 0px -50px 0px'});
+document.querySelectorAll('.anim').forEach(function(el){aobs.observe(el)});
+</script>
+{% endmacro %}
+
+{% macro chevron_svg() %}
+<svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="transition:transform 0.3s"><path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+{% endmacro %}

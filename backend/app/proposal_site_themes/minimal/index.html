@@ -1,0 +1,219 @@
+{% from "_base.html" import head_meta, google_fonts, cost_table, tracking_script, scroll_animations, chevron_svg %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+{{ head_meta(p, agency, "minimal") }}
+{{ google_fonts("DM Sans", "DM Sans") }}
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+--bg:#ffffff;--bg-card:#ffffff;
+--text-h:#171717;--text:#404040;--text-m:#737373;
+--border:#e5e5e4;
+--accent:{{ agency.colours.accent | default('#525252') }};
+--primary:{{ agency.colours.primary | default('#171717') }};
+--shadow-s:none;--shadow-m:none;
+--r:8px;
+--fh:'DM Sans',-apple-system,sans-serif;
+--fb:'DM Sans',-apple-system,sans-serif;
+--mw:640px;--mw-w:960px;--sg:112px;
+}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--text);font:15px/1.7 var(--fb);-webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--fh);color:var(--text-h);line-height:1.25;font-weight:500}
+h1{font-size:clamp(28px,4.5vw,42px)}
+h2{font-size:clamp(22px,3vw,32px);margin-bottom:16px}
+h3{font-size:18px;margin-bottom:8px}
+a{color:var(--text-h);text-decoration:none}
+p{margin-bottom:16px}
+strong{color:var(--text-h)}
+
+.sec{max-width:var(--mw-w);margin:0 auto;padding:var(--sg) 24px}
+.sec--n{max-width:var(--mw)}
+
+/* Animations */
+.anim{opacity:0;transition:opacity .4s ease}
+.anim.visible{opacity:1}
+.anim:nth-child(2){transition-delay:.1s}
+.anim:nth-child(3){transition-delay:.2s}
+.anim:nth-child(4){transition-delay:.3s}
+
+/* Cover */
+.cover{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:80px 24px}
+.cover__agency{font-family:var(--fb);font-size:12px;font-weight:500;letter-spacing:2px;text-transform:uppercase;color:var(--text-m);margin-bottom:48px}
+.cover__title{margin-bottom:16px}
+.cover__client{font-size:16px;color:var(--text-m);margin-bottom:56px;font-family:var(--fb)}
+.cover__badge{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-m);border:1px solid var(--border);padding:6px 20px;border-radius:100px}
+
+/* Letter */
+.letter{line-height:1.8}
+.letter p{margin-bottom:24px}
+.letter h2{margin-bottom:32px}
+
+/* Scope Cards */
+.scope-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.scope-card{background:var(--bg-card);border-radius:var(--r);border:1px solid var(--border);overflow:hidden;transition:border-color .3s;cursor:pointer}
+.scope-card:hover{border-color:#a3a3a2}
+.scope-card-header{padding:24px;display:flex;flex-direction:column;gap:8px}
+.scope-card-header h3{font-family:var(--fh);font-size:17px;margin:0;font-weight:500}
+.scope-price{font-size:14px;font-weight:500;color:var(--text-h)}
+.scope-hint{font-size:12px;color:var(--text-m);display:flex;align-items:center;gap:4px}
+.scope-card-body{max-height:0;overflow:hidden;padding:0 24px;transition:max-height .4s ease,padding .4s ease;border-top:0 solid var(--border);font-size:15px;line-height:1.7}
+.scope-card-body p{margin-bottom:12px}
+.scope-card-body ul,.scope-card-body ol{padding-left:20px;margin-bottom:12px}
+.scope-card-body li{margin-bottom:4px}
+.scope-card-body h3,.scope-card-body h4{font-family:var(--fb);font-size:15px;font-weight:500;margin:16px 0 6px}
+.scope-card.expanded .scope-card-body{max-height:1000px;padding:20px 24px;border-top-width:1px}
+.scope-card.expanded .scope-hint svg{transform:rotate(180deg)}
+
+/* Cost Table */
+.cost-table{width:100%;border-collapse:collapse;margin:24px 0}
+.cost-table th{text-align:left;padding:12px 16px;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-m);border-bottom:1px solid var(--border);font-family:var(--fb);font-weight:500}
+.cost-table td{padding:12px 16px;border-bottom:1px solid var(--border);font-size:15px}
+.cost-table tr:last-child td{border-bottom:none}
+.cost-totals{text-align:right;margin-top:24px;font-size:15px}
+.cost-totals p{margin-bottom:4px}
+.cost-totals .discount{color:#16a34a}
+.cost-totals .grand-total{font-family:var(--fh);font-size:clamp(22px,3vw,28px);color:var(--text-h);margin-top:16px;font-weight:500}
+
+/* Timeline */
+.timeline{display:flex;gap:0;position:relative;margin-top:32px}
+.timeline::before{content:'';position:absolute;top:24px;left:0;right:0;height:1px;background:var(--border)}
+.tl-phase{flex:1;position:relative;padding:52px 16px 0;text-align:center}
+.tl-dot{width:8px;height:8px;border-radius:50%;background:var(--text-h);position:absolute;top:21px;left:50%;transform:translateX(-50%)}
+.tl-phase h4{font-family:var(--fh);font-size:15px;margin-bottom:4px;color:var(--text-h);font-weight:500}
+.tl-phase p{font-size:13px;color:var(--text-m)}
+
+/* CTA */
+.cta{text-align:center;padding:100px 24px 80px}
+.cta h2{margin-bottom:12px}
+.cta>p{color:var(--text-m);margin-bottom:36px;font-size:16px}
+.cta-btns{display:flex;gap:16px;justify-content:center;flex-wrap:wrap}
+.btn-p{display:inline-flex;align-items:center;gap:8px;padding:14px 28px;border-radius:var(--r);background:var(--primary);color:#fff;font:500 14px/1 var(--fb);text-decoration:none;transition:opacity .2s}
+.btn-p:hover{opacity:.85}
+.btn-s{display:inline-flex;align-items:center;gap:8px;padding:14px 28px;border-radius:var(--r);background:transparent;color:var(--text-h);border:1px solid var(--border);font:500 14px/1 var(--fb);text-decoration:none;transition:border-color .2s}
+.btn-s:hover{border-color:#a3a3a2}
+
+.footer{text-align:center;padding:40px 24px;font-size:13px;color:var(--text-m);border-top:1px solid var(--border)}
+
+/* Divider */
+.divider{width:32px;height:1px;background:var(--border);margin:0 auto 48px}
+
+@media(max-width:768px){
+:root{--sg:72px}
+.scope-grid{grid-template-columns:1fr}
+.timeline{flex-direction:column;gap:0}
+.timeline::before{top:0;bottom:0;left:24px;right:auto;width:1px;height:auto}
+.tl-phase{padding:0 0 28px 56px;text-align:left}
+.tl-dot{top:4px;left:21px}
+.cover{min-height:80vh}
+}
+@media print{
+.anim{opacity:1!important;transform:none!important}
+.scope-card-body{max-height:none!important;padding:16px 24px!important;border-top-width:1px!important}
+.cover{min-height:auto;padding:60px 24px;page-break-after:always}
+.sec{padding:40px 24px;page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+
+<!-- Cover -->
+<section class="cover" data-section="cover">
+<p class="cover__agency">{{ agency.name }}</p>
+<h1 class="cover__title">{{ p.project_name }}</h1>
+{% if p.brief.client.name %}
+<p class="cover__client">Prepared for {{ p.brief.client.name }}</p>
+{% endif %}
+<span class="cover__badge">Confidential</span>
+</section>
+
+<!-- Covering Letter -->
+<section class="sec sec--n letter" data-section="letter">
+<div class="anim">
+<div class="divider"></div>
+{{ p.covering_letter | md | safe }}
+<p style="margin-top:48px;font-style:italic;color:var(--text-m)">&mdash; {{ agency.name }}</p>
+</div>
+</section>
+
+<!-- Executive Summary -->
+{% if p.executive_summary %}
+<section class="sec sec--n" data-section="summary">
+<div class="anim">
+<h2>Executive Summary</h2>
+{{ p.executive_summary | md | safe }}
+</div>
+</section>
+{% endif %}
+
+<!-- Scope Cards -->
+{% if p.scope_sections %}
+<section class="sec" data-section="scope">
+<h2 class="anim">Scope of Engagement</h2>
+<div class="scope-grid">
+{% for item in p.scope_sections %}
+<div class="scope-card anim" data-card="{{ item.deliverable }}">
+<div class="scope-card-header" onclick="this.parentElement.classList.toggle('expanded')">
+<h3>{{ item.deliverable }}</h3>
+<span class="scope-price">{{ item.total | currency }}</span>
+<span class="scope-hint">View details {{ chevron_svg() }}</span>
+</div>
+<div class="scope-card-body">
+{{ item.content | md | safe }}
+</div>
+</div>
+{% endfor %}
+</div>
+</section>
+{% endif %}
+
+<!-- Investment Summary -->
+{% if p.cost_model and p.cost_model.line_items %}
+<section class="sec" data-section="investment">
+<h2 class="anim">Investment Summary</h2>
+<div class="anim">
+{{ cost_table(p.cost_model) }}
+</div>
+</section>
+{% endif %}
+
+<!-- Timeline -->
+{% if p.scope_sections %}
+<section class="sec" data-section="timeline">
+<h2 class="anim">Project Timeline</h2>
+<div class="timeline anim">
+{% for item in p.scope_sections %}
+<div class="tl-phase">
+<div class="tl-dot"></div>
+<h4>{{ item.deliverable }}</h4>
+<p>Phase {{ loop.index }}</p>
+</div>
+{% endfor %}
+</div>
+{% if p.brief.project.timeline %}
+<p class="anim" style="text-align:center;margin-top:24px;color:var(--text-m);font-size:15px">
+Estimated duration: {{ p.brief.project.timeline }}
+</p>
+{% endif %}
+</section>
+{% endif %}
+
+<!-- CTA -->
+<section class="cta" data-section="cta">
+<h2 class="anim">Ready to get started?</h2>
+<p class="anim">Let&rsquo;s discuss this proposal and refine the details together.</p>
+<div class="cta-btns anim">
+<a href="mailto:{{ agency.email | default('') }}" class="btn-p" data-cta="schedule">Schedule a Call</a>
+<a href="javascript:void(0)" class="btn-s" data-cta="download" onclick="window.print()">Download PDF</a>
+</div>
+</section>
+
+<footer class="footer">
+<p>&copy; {{ year }} {{ agency.name }}. This proposal is confidential.</p>
+</footer>
+
+{{ scroll_animations() }}
+{{ tracking_script(proposal_id, tracking_endpoint) }}
+</body>
+</html>
