@@ -509,6 +509,12 @@ class ChatViewModel(ViewModelBase):
             await self.proposal_repo.update(proposal.id, docx_path=str(docx_path))
             files_generated.append({"type": "docx", "filename": "proposal.docx", "size": len(outputs.docx_bytes)})
 
+        if outputs.pdf_bytes:
+            pdf_path = output_dir / "proposal.pdf"
+            pdf_path.write_bytes(outputs.pdf_bytes)
+            await self.proposal_repo.update(proposal.id, pdf_path=str(pdf_path))
+            files_generated.append({"type": "pdf", "filename": "proposal.pdf", "size": len(outputs.pdf_bytes)})
+
         if outputs.pdf_html:
             html_path = output_dir / "proposal-print.html"
             html_path.write_text(outputs.pdf_html, encoding="utf-8")

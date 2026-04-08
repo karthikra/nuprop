@@ -14,7 +14,8 @@ from app.core.config import get_settings
 @dataclass
 class GeneratedOutputs:
     docx_bytes: bytes | None = None
-    pdf_html: str | None = None  # Print-ready HTML (user can print-to-PDF)
+    pdf_bytes: bytes | None = None
+    pdf_html: str | None = None  # Print-ready HTML (kept as fallback)
     email_confident: str = ""
     email_warm: str = ""
 
@@ -30,14 +31,25 @@ class DocumentGenerator:
     ) -> GeneratedOutputs:
         docx_bytes = self._generate_docx(proposal, agency_name)
         pdf_html = self._generate_pdf_html(proposal, agency_name, agency_colours)
+        pdf_bytes = self._generate_pdf(pdf_html)
         email_confident, email_warm = self._generate_email_drafts(proposal, agency_name)
 
         return GeneratedOutputs(
             docx_bytes=docx_bytes,
+            pdf_bytes=pdf_bytes,
             pdf_html=pdf_html,
             email_confident=email_confident,
             email_warm=email_warm,
         )
+
+    def _generate_pdf(self, html: str) -> bytes | None:
+        """Generate PDF from HTML using WeasyPrint."""
+        try:
+            import weasyprint
+            pdf = weasyprint.HTML(string=html).write_pdf()
+            return pdf
+        except Exception:
+            return None
 
     def _generate_docx(self, proposal: dict, agency_name: str) -> bytes:
         """Generate a professional DOCX proposal document."""

@@ -26,6 +26,7 @@ dependencies = [
     "uvicorn[standard]>=0.44.0",
     "email-validator>=2.3.0",
     "bcrypt>=5.0.0",
+    "weasyprint>=68.1",
 ]
 
 [dependency-groups]
