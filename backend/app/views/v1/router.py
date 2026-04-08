@@ -12,6 +12,7 @@ from app.views.v1.health import router as health_router
 from app.views.v1.notifications import router as notifications_router
 from app.views.v1.proposals import router as proposals_router
 from app.views.v1.rate_cards import router as rate_cards_router
+from app.views.v1.templates import router as templates_router
 from app.views.v1.track import router as track_router
 
 api_router = APIRouter(prefix="/api/v1")
@@ -24,5 +25,6 @@ api_router.include_router(chat_router)
 api_router.include_router(downloads_router)
 api_router.include_router(track_router)
 api_router.include_router(rate_cards_router)
+api_router.include_router(templates_router)
 api_router.include_router(analytics_router)
 api_router.include_router(notifications_router)
