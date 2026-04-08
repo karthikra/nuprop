@@ -11,6 +11,8 @@ dist/
 
 # Environment
 .env
+.env.docker
+.env.local
 !.env.example
 
 # IDE
@@ -20,6 +22,10 @@ dist/
 
 # OS
 .DS_Store
+
+# Generated outputs
+outputs/
+backend/outputs/
 
 # Alembic
 alembic/versions/__pycache__/

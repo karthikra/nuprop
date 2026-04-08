@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     def is_sqlite(self) -> bool:
         return self.DATABASE_URL.startswith("sqlite")
 
+    @computed_field
+    @property
+    def OUTPUT_DIR(self) -> str:
+        if self.is_production:
+            return "/data/outputs"
+        return "outputs"
+
 
 @lru_cache
 def get_settings() -> Settings:

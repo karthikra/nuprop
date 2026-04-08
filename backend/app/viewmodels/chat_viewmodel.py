@@ -513,9 +513,7 @@ class ChatViewModel(ViewModelBase):
         )
 
         # Save files locally (R2 in production)
-        settings = get_settings()
-        output_dir = Path(settings.LOCAL_STORAGE_PATH if hasattr(settings, 'LOCAL_STORAGE_PATH') else "outputs")
-        output_dir = Path("outputs") / str(proposal_id)
+        output_dir = Path(get_settings().OUTPUT_DIR) / str(proposal_id)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         files_generated = []

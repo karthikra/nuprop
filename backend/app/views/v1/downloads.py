@@ -29,7 +29,8 @@ async def download_file(
 
     # Validate filename to prevent path traversal
     safe_name = Path(filename).name
-    file_path = Path("outputs") / str(proposal_id) / safe_name
+    from app.core.config import get_settings
+    file_path = Path(get_settings().OUTPUT_DIR) / str(proposal_id) / safe_name
 
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")

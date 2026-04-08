@@ -1,0 +1,58 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: nuprop
+      POSTGRES_USER: nuprop
+      POSTGRES_PASSWORD: nuprop_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nuprop"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    env_file: .env.docker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://nuprop:nuprop_dev_password@db:5432/nuprop
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      JWT_SECRET_KEY: local-dev-jwt-secret-change-in-real-prod
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      CORS_ORIGINS: '["http://localhost:8080"]'
+      PROPOSAL_SITE_DOMAIN: localhost:8080
+      REDIS_ENABLED: "false"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: http://localhost:8080/settings/gmail-callback
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+      SLACK_REDIRECT_URI: http://localhost:8080/settings/slack-callback
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+    volumes:
+      - appdata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    # Run Alembic migrations before starting the app
+    command: >
+      sh -c "
+        cd /app/backend &&
+        alembic upgrade head &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8080
+      "
+
+volumes:
+  pgdata:
+  appdata:

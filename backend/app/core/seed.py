@@ -12,6 +12,7 @@ from app.infrastructure.db.models.template import StrategyTemplate
 # Path to templates JSON — check multiple locations
 _TEMPLATE_PATHS = [
     Path(__file__).parent.parent.parent.parent / "web_app_seed" / "veeville-templates.json",
+    Path("/app/web_app_seed/veeville-templates.json"),  # Docker path
     Path.home() / ".claude" / "skills" / "proposal-gen" / "templates" / "veeville-templates.json",
 ]
 

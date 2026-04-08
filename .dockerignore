@@ -1,0 +1,15 @@
+.git
+.github
+.claude
+.idea
+.vscode
+*.pyc
+__pycache__
+backend/.venv
+backend/outputs
+backend/nuprop.db
+backend/*.db
+frontend/node_modules
+frontend/dist
+.env
+.env.local
