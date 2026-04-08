@@ -1,99 +1,151 @@
 from __future__ import annotations
 
 from app.infrastructure.external.anthropic_client import AnthropicClient
-from app.infrastructure.external.web_search_client import WebSearchClient
+from app.core.config import get_settings
 
-SYNTHESIS_PROMPT = """You are a research assistant for a proposal copilot. Given web search results about a client, synthesize them into a structured research report.
 
-## Output format (markdown):
+RESEARCH_SYSTEM = """You are a senior research analyst preparing intelligence for a proposal copilot. Your job is to build a comprehensive, fact-based client profile that will directly inform a business proposal.
+
+## Research Strategy
+Search the web thoroughly. Run multiple searches to cover all angles. If initial searches are thin, try alternative queries. You have up to {max_searches} web searches available — use them all if needed.
+
+## What to Research (in order of priority)
+
+### 1. Company Fundamentals
+- Full legal name, founding year, headquarters
+- Revenue, employee count, public/private status
+- Parent company or group affiliation
+- Core business: what they actually do, who their customers are
+
+### 2. Leadership & Decision-Makers
+- CEO/MD name, tenure, background
+- Recent leadership changes (incoming, outgoing, reshuffles)
+- Board composition if public company
+- Key executives in areas relevant to this project
+
+### 3. Recent Developments (last 6-12 months)
+- Press releases, product launches, acquisitions
+- Funding rounds, IPO plans, financial results
+- Strategic pivots, new market entries
+- Awards, recognitions, rankings (Gartner, Forrester, industry-specific)
+
+### 4. Industry & Competitive Position
+- Market share, competitive landscape
+- Key competitors and how they differentiate
+- Industry trends affecting this client
+- Analyst commentary or ratings
+
+### 5. Brand & Digital Presence
+- Website quality, design maturity, technology stack signals
+- Social media presence and engagement quality
+- Content marketing, thought leadership
+- Recent campaigns or brand initiatives
+
+### 6. Proposal-Relevant Intelligence
+- Anything that suggests what they NEED from an agency
+- Pain points visible in their public communications
+- Opportunities a design/creative agency could address
+- Cultural signals: are they conservative? innovative? process-heavy?
+
+{context_section}
+
+{template_section}
+
+## Output Format (markdown)
 
 # Client Research: {client_name}
 
 ## Company Overview
-- Founded: [year]
-- Revenue: [amount]
-- Employees: ~[number]
-- Industry: [sector]
-- Headquarters: [city]
-
-## Recent Developments
-- [bullet points from search results]
+[Comprehensive paragraph with specific numbers and facts]
 
 ## Leadership
-- CEO/MD: [name]
-- Key contacts mentioned: [names and roles if found]
+[Key people with roles, tenure, recent changes]
 
-## Current Brand/Digital Presence
-- [observations about their website, social presence, brand quality]
+## Recent Developments
+[Chronological bullet points, most recent first, with dates]
 
-## Relevance to Our Proposal
-- [2-3 observations that should inform our approach]
+## Industry Position
+[Market context, competitors, positioning]
+
+## Brand & Digital Assessment
+[Observations about their current presence and quality]
+
+## Narrative Hooks for Our Proposal
+[3-5 specific facts, quotes, or observations that should be woven into the covering letter. These are the "I did my homework" signals.]
+
+## Strategic Opportunities
+[2-3 observations about what they might need from a creative/design agency]
 
 ## Sources
-- [list URLs used]
+[List all URLs referenced]
 
-Only include information you actually found in the search results. Do not fabricate. If something was not found, omit that section rather than guessing."""
+IMPORTANT: Only include information you actually found. Never fabricate facts, numbers, or quotes. If a section has no data, write "Not found in public sources" rather than guessing."""
 
 
 class ResearchAgent:
     def __init__(self):
-        self._search = WebSearchClient()
-        self._llm = AnthropicClient()
+        self._client = AnthropicClient()
 
     async def research_client(
         self,
         client_name: str,
         industry: str | None = None,
         template_queries: list[str] | None = None,
+        context_brief: str | None = None,
+        max_searches: int = 10,
     ) -> str:
-        """Research the client using web search + Claude synthesis. Returns markdown."""
-        # Build search queries
-        queries = template_queries or []
-        if not queries:
-            year = "2025 2026"
-            queries = [
-                f"{client_name} company overview revenue",
-                f"{client_name} recent news {year}",
-                f"{client_name} CEO leadership",
-                f"{client_name} awards recognition {year}",
-            ]
-            if industry:
-                queries.append(f"{client_name} {industry} competitors")
+        """Research the client using Claude's native web search. Returns markdown."""
+        if not self._client.is_configured:
+            return f"# Client Research: {client_name}\n\n*AI not configured. Set ANTHROPIC_API_KEY to enable research.*"
 
-        # Replace placeholders
-        queries = [
-            q.replace("{client}", client_name)
-             .replace("{industry}", industry or "")
-             .replace("{year}", "2026")
-            for q in queries
-        ]
+        # Build context section
+        context_section = ""
+        if context_brief:
+            context_section = f"""## Existing Context (from past interactions)
+The agency already knows this about the client:
+{context_brief}
 
-        # Run searches
-        all_results = await self._search.search_multiple(queries, num_per_query=3)
+Focus your research on what's NEW or what fills gaps in the existing context. Don't repeat what's already known."""
 
-        # Format results for Claude
-        search_context = self._format_results(all_results)
+        # Build template section
+        template_section = ""
+        if template_queries:
+            queries_list = "\n".join(f"- {q}" for q in template_queries)
+            template_section = f"""## Template-Specific Research Priorities
+This is a specialized proposal type. Also research these angles:
+{queries_list}"""
 
-        if not self._llm.is_configured:
-            return f"# Client Research: {client_name}\n\n*AI not configured. Search results:*\n\n{search_context}"
-
-        # Synthesize with Claude
-        research = await self._llm.complete(
-            system=SYNTHESIS_PROMPT,
-            messages=[{
-                "role": "user",
-                "content": f"Client: {client_name}\nIndustry: {industry or 'Unknown'}\n\nSearch results:\n\n{search_context}",
-            }],
-            max_tokens=2048,
-            temperature=0.3,
+        system = RESEARCH_SYSTEM.format(
+            client_name=client_name,
+            max_searches=max_searches,
+            context_section=context_section,
+            template_section=template_section,
         )
-        return research
 
-    def _format_results(self, results: dict[str, list]) -> str:
-        parts = []
-        for query, items in results.items():
-            parts.append(f"### Query: {query}")
-            for r in items:
-                parts.append(f"- **{r.title}** ({r.url})\n  {r.snippet}")
-            parts.append("")
-        return "\n".join(parts)
+        user_msg = f"Research {client_name}"
+        if industry:
+            user_msg += f" (industry: {industry})"
+        user_msg += ". Be thorough — this research directly feeds into a high-value proposal. Search the web comprehensively."
+
+        settings = get_settings()
+
+        # Use Claude's native web search via the Anthropic SDK
+        response = await self._client._client.messages.create(
+            model=settings.ANTHROPIC_DEFAULT_MODEL,
+            max_tokens=4096,
+            system=system,
+            tools=[{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": max_searches,
+            }],
+            messages=[{"role": "user", "content": user_msg}],
+        )
+
+        # Extract text from the response (may contain multiple text blocks interspersed with tool use)
+        text_parts = []
+        for block in response.content:
+            if hasattr(block, "text") and block.text:
+                text_parts.append(block.text)
+
+        return "".join(text_parts) if text_parts else f"# Client Research: {client_name}\n\nNo research results found."

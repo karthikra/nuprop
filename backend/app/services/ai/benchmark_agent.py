@@ -1,40 +1,55 @@
 from __future__ import annotations
 
 from app.infrastructure.external.anthropic_client import AnthropicClient
-from app.infrastructure.external.web_search_client import WebSearchClient
+from app.core.config import get_settings
 
-SYNTHESIS_PROMPT = """You are a market research assistant for a proposal copilot. Given web search results about pricing for specific service categories, extract structured benchmark data.
 
-## Output format (markdown):
+BENCHMARK_SYSTEM = """You are a market research analyst specializing in agency pricing. Your job is to find published pricing benchmarks for specific service categories so a design agency can justify their proposal pricing.
+
+## Research Strategy
+Search the web for real pricing data. Focus on:
+- Agency pricing guides and rate cards (India preferred, global as fallback)
+- Industry reports on creative/design service costs
+- Clutch, DesignRush, and agency review platform data
+- Published case studies with known budgets
+- Quora/Reddit threads discussing agency costs (lower quality but useful for ranges)
+
+You have up to {max_searches} web searches. Use them strategically — one search per major category, plus follow-ups for thin results.
+
+## Categories to Benchmark
+{categories_section}
+
+## Output Format (markdown)
 
 # Market Benchmarks
 
-For each service category, provide:
+For each service category:
 
 ## [Category Name]
+
 | Tier | Price Range | Source |
 |------|-------------|--------|
-| Budget/Freelancer | ₹X - ₹Y | [source] |
-| Mid-tier Agency | ₹X - ₹Y | [source] |
-| Premium Agency | ₹X - ₹Y | [source] |
+| Budget / Freelancer | ₹X — ₹Y | [source name, year] |
+| Mid-tier Agency | ₹X — ₹Y | [source name, year] |
+| Premium / Enterprise Agency | ₹X — ₹Y | [source name, year] |
 
-**Data points found**: [number]
-**Confidence**: High / Medium / Low
+**Data confidence**: High (3+ sources) / Medium (2 sources) / Low (1 source or estimates)
+**Notes**: [any relevant context about pricing variations]
 
 ---
 
-## Rules:
-- Only include data you actually found in search results. NEVER fabricate benchmark numbers.
-- If no data found for a category, write: "No published benchmark found — estimate from rate card needed."
-- Prefer Indian pricing data. Convert USD to INR at 1 USD = ₹84 if only USD sources found.
-- Always cite the source (publication name + year).
-- Prefer recent data (2025-2026) over older sources."""
+## Rules
+- NEVER fabricate benchmark numbers. If you can't find real data, say "No published benchmark found — estimate from rate card needed."
+- Always cite the source (publication name + year) for every number.
+- Prefer recent data (2025-2026) over older sources.
+- Prefer Indian pricing data for India-based proposals. Convert USD to INR at ₹84/$1 if only USD found.
+- Include the source URL when available.
+- Note when prices include or exclude GST."""
 
 
 class BenchmarkAgent:
     def __init__(self):
-        self._search = WebSearchClient()
-        self._llm = AnthropicClient()
+        self._client = AnthropicClient()
 
     async def find_benchmarks(
         self,
@@ -42,60 +57,50 @@ class BenchmarkAgent:
         country: str = "India",
         template_queries: list[str] | None = None,
         template_categories: list[str] | None = None,
+        max_searches: int = 8,
     ) -> str:
-        """Search for pricing benchmarks per deliverable category. Returns markdown."""
-        # Build search queries per deliverable category
+        """Search for pricing benchmarks using Claude's native web search. Returns markdown."""
+        if not self._client.is_configured:
+            return "# Market Benchmarks\n\n*AI not configured. Set ANTHROPIC_API_KEY to enable benchmarking.*"
+
+        # Build categories section
         categories = set()
         for d in deliverables:
             cat = d.get("category", "")
+            details = d.get("details", "")
             if cat:
-                categories.add(cat)
+                categories.add(f"{cat}: {details}" if details else cat)
 
-        queries = template_queries or []
-        if not queries:
-            year = "2025 2026"
-            for cat in categories:
-                queries.append(f"{cat} cost {country} agency {year}")
-                queries.append(f"{cat} pricing guide agency")
+        categories_section = "\n".join(f"- {c}" for c in categories) if categories else "- General design agency services"
 
-        # Replace placeholders
-        queries = [
-            q.replace("{country}", country)
-             .replace("{year}", "2026")
-             .replace("{service_type}", "design agency services")
-            for q in queries
-        ]
+        if template_queries:
+            extra = "\n".join(f"- {q}" for q in template_queries)
+            categories_section += f"\n\nAlso search for:\n{extra}"
 
-        # Cap at 10 queries to stay within reasonable search budget
-        queries = queries[:10]
-
-        # Run searches
-        all_results = await self._search.search_multiple(queries, num_per_query=3)
-
-        # Format for Claude
-        search_context = self._format_results(all_results)
-        category_list = ", ".join(categories) if categories else "general agency services"
-
-        if not self._llm.is_configured:
-            return f"# Market Benchmarks\n\n*AI not configured. Search results:*\n\n{search_context}"
-
-        # Synthesize with Claude
-        benchmarks = await self._llm.complete(
-            system=SYNTHESIS_PROMPT,
-            messages=[{
-                "role": "user",
-                "content": f"Categories to benchmark: {category_list}\nCountry: {country}\n\nSearch results:\n\n{search_context}",
-            }],
-            max_tokens=3000,
-            temperature=0.3,
+        system = BENCHMARK_SYSTEM.format(
+            max_searches=max_searches,
+            categories_section=categories_section,
         )
-        return benchmarks
 
-    def _format_results(self, results: dict[str, list]) -> str:
-        parts = []
-        for query, items in results.items():
-            parts.append(f"### Query: {query}")
-            for r in items:
-                parts.append(f"- **{r.title}** ({r.url})\n  {r.snippet}")
-            parts.append("")
-        return "\n".join(parts)
+        user_msg = f"Find pricing benchmarks for these design/creative agency services in {country}. Search the web for real published data."
+
+        settings = get_settings()
+
+        response = await self._client._client.messages.create(
+            model=settings.ANTHROPIC_DEFAULT_MODEL,
+            max_tokens=4096,
+            system=system,
+            tools=[{
+                "type": "web_search_20250305",
+                "name": "web_search",
+                "max_uses": max_searches,
+            }],
+            messages=[{"role": "user", "content": user_msg}],
+        )
+
+        text_parts = []
+        for block in response.content:
+            if hasattr(block, "text") and block.text:
+                text_parts.append(block.text)
+
+        return "".join(text_parts) if text_parts else "# Market Benchmarks\n\nNo benchmark data found."
