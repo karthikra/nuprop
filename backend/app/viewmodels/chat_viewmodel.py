@@ -225,6 +225,20 @@ class ChatViewModel(ViewModelBase):
         industry = brief.get("client", {}).get("industry")
         deliverables = brief.get("project", {}).get("deliverables", [])
 
+        # Load client context brief if available
+        context_brief = None
+        try:
+            from sqlalchemy import select as _sel
+            from app.infrastructure.db.models.client import Client as _Client
+            result = await self._db.execute(_sel(_Client).where(_Client.id == str(proposal.client_id)))
+            client_row = result.scalar_one_or_none()
+            if client_row and client_row.context_profile:
+                from app.services.context_service import ContextService
+                ctx_svc = ContextService()
+                context_brief = await ctx_svc.generate_context_brief(client_name, client_row.context_profile)
+        except Exception:
+            pass  # Don't let context loading block research
+
         # Progress: research starting
         await self._broadcast_progress(proposal_id, "research", "searching", f"Researching {client_name}...")
 
@@ -234,7 +248,7 @@ class ChatViewModel(ViewModelBase):
             research_queries = template_config.get("research", {}).get("client_queries")
 
         agent = ResearchAgent()
-        research_md = await agent.research_client(client_name, industry, research_queries)
+        research_md = await agent.research_client(client_name, industry, research_queries, context_brief=context_brief)
         await self.proposal_repo.update(proposal.id, research=research_md)
 
         await self._broadcast_progress(proposal_id, "research", "complete", "Client research done")

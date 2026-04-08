@@ -29,6 +29,7 @@ class ClientUpdate(BaseModel):
     contacts: list[ContactInfo] | None = None
     notes: str | None = None
     tags: list[str] | None = None
+    context_profile: dict | None = None
 
 
 class ClientResponse(BaseModel):

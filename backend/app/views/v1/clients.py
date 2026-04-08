@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_agency_id
@@ -63,3 +64,54 @@ async def update_client(
 async def delete_client(client_id: UUID, vm: ClientViewModel = Depends(get_vm)):
     if not await vm.delete_client(client_id):
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
+
+
+class ContextInput(BaseModel):
+    raw_text: str
+
+
+@router.post("/{client_id}/context", response_model=ClientResponse)
+async def add_context(
+    client_id: UUID,
+    body: ContextInput,
+    vm: ClientViewModel = Depends(get_vm),
+):
+    """Parse pasted text into structured context and merge into client profile."""
+    client = await vm.get_client(client_id)
+    if not client:
+        raise HTTPException(status_code=vm.status_code, detail=vm.error)
+
+    from app.services.context_service import ContextService
+    svc = ContextService()
+
+    # Extract structured context from pasted text
+    extraction = await svc.extract_context(body.raw_text)
+
+    # Merge with existing context profile
+    existing = client.context_profile or {}
+    merged = await svc.merge_context(existing, extraction)
+
+    # Save to client
+    updated = await vm.update_client(client_id, ClientUpdate(context_profile=merged))  # type: ignore
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to update context")
+    return updated
+
+
+@router.get("/{client_id}/context-brief")
+async def get_context_brief(
+    client_id: UUID,
+    vm: ClientViewModel = Depends(get_vm),
+):
+    """Generate a natural-language Context Brief for this client."""
+    client = await vm.get_client(client_id)
+    if not client:
+        raise HTTPException(status_code=vm.status_code, detail=vm.error)
+
+    if not client.context_profile:
+        return {"brief": "", "has_context": False}
+
+    from app.services.context_service import ContextService
+    svc = ContextService()
+    brief = await svc.generate_context_brief(client.name, client.context_profile)
+    return {"brief": brief, "has_context": True}

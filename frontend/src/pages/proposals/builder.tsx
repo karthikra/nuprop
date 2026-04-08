@@ -55,7 +55,12 @@ export function BuilderPage() {
       <div className="flex pt-14 h-screen">
         <PipelineSidebar proposal={proposal} clientName={client?.name} />
         <main className="flex-1 flex flex-col min-w-0">
-          <ChatContainer proposalId={id!} />
+          <ChatContainer
+            proposalId={id!}
+            clientId={proposal.client_id}
+            clientName={client?.name}
+            clientHasContext={!!client?.context_profile && Object.keys(client.context_profile).length > 0}
+          />
         </main>
         <PreferencePanel proposal={proposal} templateConfig={template?.config} />
       </div>
