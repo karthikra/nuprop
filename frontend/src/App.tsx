@@ -14,6 +14,7 @@ import { NewProposalPage } from './pages/proposals/new'
 import { BuilderPage } from './pages/proposals/builder'
 import { AnalyticsOverviewPage } from './pages/analytics/overview'
 import { AnalyticsDetailPage } from './pages/analytics/detail'
+import { RateCardEditorPage } from './pages/rate-card/editor'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -82,7 +83,7 @@ export default function App() {
               <Route path="/proposals/new" element={<NewProposalPage />} />
               <Route path="/clients" element={<ClientListPage />} />
               <Route path="/clients/:id" element={<ClientDetailPage />} />
-              <Route path="/rate-card" element={<Placeholder title="Rate Card" />} />
+              <Route path="/rate-card" element={<RateCardEditorPage />} />
               <Route path="/templates" element={<Placeholder title="Templates" />} />
               <Route path="/analytics" element={<AnalyticsOverviewPage />} />
               <Route path="/analytics/:id" element={<AnalyticsDetailPage />} />
