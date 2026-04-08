@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.schemas.proposal_schemas import ProposalCreate, ProposalListItem, ProposalUpdate
+from app.domain.schemas.proposal_schemas import PREF_PHASE_MAP, PreferencesUpdate, ProposalCreate, ProposalListItem, ProposalUpdate
 from app.infrastructure.db.models.proposal import Proposal, ProposalStatus
 from app.infrastructure.db.repositories.client_repo import ClientRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
@@ -87,3 +87,31 @@ class ProposalViewModel(ViewModelBase):
         if not proposal:
             return False
         return await self.repo.delete(proposal_id)
+
+    async def update_preferences(self, proposal_id: UUID, agency_id: UUID, data: PreferencesUpdate) -> Proposal | None:
+        proposal = await self.get_proposal(proposal_id, agency_id)
+        if not proposal:
+            return None
+
+        # Merge new prefs into existing
+        current_prefs = proposal.preferences.copy() if proposal.preferences else {}
+        new_prefs = data.model_dump(exclude_unset=True)
+        current_prefs.update(new_prefs)
+
+        # Track staleness — which completed phases are affected
+        pipeline = proposal.pipeline_state.copy() if proposal.pipeline_state else {}
+        completed = pipeline.get("phases_completed", [])
+        stale = set(pipeline.get("stale_phases", []))
+
+        for pref_key in new_prefs:
+            affected_phase = PREF_PHASE_MAP.get(pref_key)
+            if affected_phase and affected_phase in completed:
+                stale.add(affected_phase)
+
+        pipeline["stale_phases"] = sorted(stale)
+
+        return await self.repo.update(
+            proposal_id,
+            preferences=current_prefs,
+            pipeline_state=pipeline,
+        )

@@ -67,6 +67,7 @@ class CostModel:
     grand_total: int = 0
     currency: str = "INR"
     multipliers_applied: list[str] = field(default_factory=list)
+    tiered: dict = field(default_factory=dict)  # {essential: {...}, standard: {...}, premium: {...}}
     pricing_notes: str = ""
 
 
@@ -164,7 +165,7 @@ class CostModelBuilder:
         gst_amount = self._round_price(total * 0.18)  # GST always 18%
         grand_total = total + gst_amount
 
-        return CostModel(
+        model = CostModel(
             line_items=line_items,
             subtotal=subtotal,
             discount_percent=discount_percent,
@@ -176,6 +177,49 @@ class CostModelBuilder:
             currency="INR",
             multipliers_applied=multipliers_applied,
         )
+
+        # Speculative execution: always pre-compute tiered pricing
+        model.tiered = self._build_tiered(line_items, discount_percent)
+
+        return model
+
+    def _build_tiered(self, line_items: list[CostLineItem], discount_percent: float) -> dict:
+        """Speculatively generate a 3-tier pricing variant from the flat line items."""
+        essential_items = []
+        standard_items = []
+        premium_items = []
+
+        for item in line_items:
+            std = {"deliverable": item.deliverable, "quantity": item.quantity, "unit_cost": item.unit_cost, "total": item.total}
+            standard_items.append(std)
+
+            # Essential: exact matches at base price, close matches at 80%, skip hourly estimates
+            if item.match_quality == "exact":
+                essential_items.append(std.copy())
+            elif item.match_quality == "close":
+                ess = std.copy()
+                ess["unit_cost"] = self._round_price(item.unit_cost * 0.8)
+                ess["total"] = ess["unit_cost"] * item.quantity
+                essential_items.append(ess)
+
+            # Premium: all items with 20% uplift for premium service
+            prem = std.copy()
+            prem["unit_cost"] = self._round_price(item.unit_cost * 1.2)
+            prem["total"] = prem["unit_cost"] * item.quantity
+            premium_items.append(prem)
+
+        def tier_totals(items: list[dict]) -> dict:
+            subtotal = sum(i["total"] for i in items)
+            disc = self._round_price(subtotal * discount_percent / 100)
+            total = subtotal - disc
+            gst = self._round_price(total * 0.18)
+            return {"line_items": items, "subtotal": subtotal, "discount_amount": disc, "total": total, "gst_amount": gst, "grand_total": total + gst}
+
+        return {
+            "essential": tier_totals(essential_items),
+            "standard": tier_totals(standard_items),
+            "premium": tier_totals(premium_items),
+        }
 
     def _build_package_index(self, offerings: dict) -> dict[str, dict]:
         """Flatten offerings into {package_id: {base, description, ...}}."""
@@ -352,5 +396,6 @@ class CostModelBuilder:
             "grand_total": model.grand_total,
             "currency": model.currency,
             "multipliers_applied": model.multipliers_applied,
+            "tiered": model.tiered,
             "pricing_notes": model.pricing_notes,
         }

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_agency_id
 from app.domain.schemas.proposal_schemas import (
+    PreferencesUpdate,
     ProposalCreate,
     ProposalListItem,
     ProposalResponse,
@@ -78,3 +79,16 @@ async def delete_proposal(
 ):
     if not await vm.delete_proposal(proposal_id, agency_id):
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
+
+
+@router.patch("/{proposal_id}/preferences", response_model=ProposalResponse)
+async def update_preferences(
+    proposal_id: UUID,
+    data: PreferencesUpdate,
+    agency_id: UUID = Depends(get_current_agency_id),
+    vm: ProposalViewModel = Depends(get_vm),
+):
+    proposal = await vm.update_preferences(proposal_id, agency_id, data)
+    if not proposal:
+        raise HTTPException(status_code=vm.status_code, detail=vm.error)
+    return proposal

@@ -12,6 +12,7 @@ export function PipelineSidebar({ proposal, clientName }: Props) {
   const navigate = useNavigate()
   const pipelinePhase = useChatStore((s) => s.pipelinePhase)
   const completedPhases = proposal.pipeline_state?.phases_completed || []
+  const stalePhases = proposal.pipeline_state?.stale_phases || []
 
   return (
     <aside className="w-72 border-r border-stone-200 bg-white flex flex-col flex-shrink-0 h-full overflow-y-auto">
@@ -37,12 +38,19 @@ export function PipelineSidebar({ proposal, clientName }: Props) {
           {PIPELINE_PHASES.map((phase) => {
             const isCurrent = pipelinePhase === phase.key
             const isCompleted = completedPhases.includes(phase.key)
+            const isStale = stalePhases.includes(phase.key)
 
             return (
               <div key={phase.key} className="flex items-center gap-3 py-1.5">
                 {/* Status indicator */}
                 <div className="flex-shrink-0">
-                  {isCompleted ? (
+                  {isCompleted && isStale ? (
+                    <div className="w-5 h-5 rounded-full bg-amber-400 flex items-center justify-center" title="Preferences changed — may need regeneration">
+                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 9v2m0 4h.01" />
+                      </svg>
+                    </div>
+                  ) : isCompleted ? (
                     <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
                       <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />

@@ -379,6 +379,9 @@ class ChatViewModel(ViewModelBase):
 
         generator = NarrativeGenerator()
 
+        # Merge user preferences on top of template config
+        effective_config = self._merge_preferences_into_config(template_config, proposal.preferences or {})
+
         await self._broadcast_progress(proposal_id, "narrative", "searching", "Writing covering letter (2 variants)...")
 
         narr = await generator.generate_all(
@@ -386,7 +389,7 @@ class ChatViewModel(ViewModelBase):
             research=proposal.research,
             benchmarks=proposal.benchmarks,
             cost_model=proposal.cost_model or {},
-            template_config=template_config,
+            template_config=effective_config,
             agency_name=agency.name if agency else "the agency",
             agency_voice=agency.voice_profile if agency else None,
             agency_default_terms=agency.default_terms if agency else None,
@@ -756,6 +759,45 @@ class ChatViewModel(ViewModelBase):
                 "message": ChatMessageResponse.model_validate(msg).model_dump(mode="json"),
             },
         )
+
+    @staticmethod
+    def _merge_preferences_into_config(template_config: dict | None, preferences: dict) -> dict:
+        """Overlay user preferences onto template config for AI services."""
+        config = dict(template_config or {})
+        if not preferences:
+            return config
+
+        narr = dict(config.get("narrative", {}))
+        if preferences.get("letter_strategy"):
+            narr["letter_strategy"] = preferences["letter_strategy"]
+        if preferences.get("letter_opening"):
+            narr["letter_opening_instruction"] = preferences["letter_opening"]
+        if preferences.get("scope_detail_level"):
+            narr["scope_detail_level"] = preferences["scope_detail_level"]
+        if preferences.get("letter_length"):
+            narr["letter_length"] = preferences["letter_length"]
+        if preferences.get("letter_custom_instructions"):
+            narr["letter_custom_instructions"] = preferences["letter_custom_instructions"]
+        if narr:
+            config["narrative"] = narr
+
+        cm = dict(config.get("cost_model", {}))
+        if preferences.get("pricing_model"):
+            cm["pricing_model"] = preferences["pricing_model"]
+        if preferences.get("discount_tags"):
+            cm["default_multipliers"] = preferences["discount_tags"]
+        if cm:
+            config["cost_model"] = cm
+
+        out = dict(config.get("output", {}))
+        if preferences.get("site_theme"):
+            out["site_theme"] = preferences["site_theme"]
+        if preferences.get("primary_format"):
+            out["primary_format"] = preferences["primary_format"]
+        if out:
+            config["output"] = out
+
+        return config
 
     async def _echo_response(
         self,

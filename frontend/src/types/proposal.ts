@@ -31,8 +31,30 @@ export interface ProposalCreate {
 export interface PipelineState {
   current_phase: string
   phases_completed: string[]
+  stale_phases?: string[]
   context: Record<string, unknown>
 }
+
+export interface ProposalPreferences {
+  letter_strategy?: string
+  letter_opening?: string
+  letter_length?: string
+  letter_custom_instructions?: string
+  pricing_model?: string
+  discount_tags?: string[]
+  payment_terms?: string
+  scope_detail_level?: string
+  site_theme?: string
+  primary_format?: string
+}
+
+export const LETTER_STRATEGIES = ['confident', 'warm', 'technical_showcase', 'research_heavy', 'relationship_builder'] as const
+export const LETTER_OPENINGS = ['client_story', 'client_problem', 'market_context', 'provocative_question', 'shared_connection', 'straight_to_scope'] as const
+export const LETTER_LENGTHS = ['concise', 'standard', 'extended'] as const
+export const PRICING_MODELS = ['flat', 'tiered'] as const
+export const SCOPE_LEVELS = ['brief', 'standard', 'detailed', 'exhaustive'] as const
+export const SITE_THEMES = ['editorial', 'bold', 'minimal', 'dark', 'warm'] as const
+export const PAYMENT_TERMS_OPTIONS = ['milestone', 'monthly', '50_50'] as const
 
 export interface ChatMessage {
   id: string
