@@ -32,6 +32,7 @@ export interface PipelineState {
   current_phase: string
   phases_completed: string[]
   stale_phases?: string[]
+  context_overrides?: Array<{key: string; value: string; reason: string}>
   context: Record<string, unknown>
 }
 

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useClient, useUpdateClient, useDeleteClient } from '../../api/clients'
+import { useClientIntelligence } from '../../api/intelligence'
 import { ClientForm } from '../../components/clients/client-form'
 import type { ClientCreate } from '../../types/client'
 
@@ -10,6 +11,7 @@ export function ClientDetailPage() {
   const { data: client, isLoading } = useClient(id!)
   const updateClient = useUpdateClient()
   const deleteClient = useDeleteClient()
+  const { data: intelligence } = useClientIntelligence(id!)
   const [editing, setEditing] = useState(false)
 
   if (isLoading) return <p className="text-sm text-stone-400">Loading...</p>
@@ -36,6 +38,9 @@ export function ClientDetailPage() {
           <div className="mt-1 flex items-center gap-3 text-sm text-stone-500">
             {client.industry && <span>{client.industry}</span>}
             {client.size && <span className="capitalize">{client.size}</span>}
+            {intelligence?.quality_score != null ? (
+              <QualityBadge score={intelligence.quality_score.total} level={intelligence.quality_score.level} />
+            ) : null}
           </div>
         </div>
         <div className="flex gap-2">
@@ -109,6 +114,61 @@ export function ClientDetailPage() {
           {/* Context Profile card */}
           <ContextProfileCard profile={client.context_profile} />
 
+          {/* Intelligence cards */}
+          {intelligence != null ? (
+            <>
+              {/* Sentiment Timeline */}
+              {intelligence.sentiment_timeline.length > 0 ? (
+                <div className="rounded-xl border border-stone-200 bg-white p-5 md:col-span-2">
+                  <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide mb-3">Relationship Timeline</h3>
+                  <div className="space-y-2">
+                    {intelligence.sentiment_timeline.map((e, i) => (
+                      <div key={i} className="flex items-start gap-3 text-sm">
+                        <div className={`w-2.5 h-2.5 rounded-full mt-1.5 flex-shrink-0 ${
+                          e.sentiment === 'positive' ? 'bg-green-400' : e.sentiment === 'negative' ? 'bg-red-400' : 'bg-stone-300'
+                        }`} />
+                        <div>
+                          <p className="text-stone-800">{e.event}</p>
+                          {e.date ? <p className="text-xs text-stone-400">{e.date}</p> : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Source Breakdown */}
+              {Object.keys(intelligence.source_breakdown).length > 0 ? (
+                <div className="rounded-xl border border-stone-200 bg-white p-5">
+                  <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide mb-3">Context Sources</h3>
+                  <div className="space-y-2">
+                    {Object.entries(intelligence.source_breakdown).map(([source, count]) => (
+                      <div key={source} className="flex items-center justify-between text-sm">
+                        <span className="text-stone-600 capitalize">{source}</span>
+                        <span className="font-medium text-stone-900">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Preference Overrides */}
+              {intelligence.preference_overrides.length > 0 ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
+                  <h3 className="text-sm font-semibold text-amber-700 uppercase tracking-wide mb-3">AI Recommendations</h3>
+                  <div className="space-y-2">
+                    {intelligence.preference_overrides.map((o, i) => (
+                      <div key={i} className="text-sm">
+                        <p className="text-amber-900 font-medium">{o.key.replace(/_/g, ' ')}: {o.value}</p>
+                        <p className="text-amber-700 text-xs">{o.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : null}
+
           {/* Proposals card (placeholder) */}
           <div className="rounded-xl border border-dashed border-stone-300 bg-white p-5 md:col-span-2">
             <h3 className="text-sm font-semibold text-stone-500 uppercase tracking-wide">Proposals</h3>
@@ -170,5 +230,20 @@ function ContextProfileCard({ profile }: { profile: Record<string, unknown> }) {
         ) : null}
       </div>
     </div>
+  )
+}
+
+const QUALITY_COLOURS: Record<string, string> = {
+  full: 'bg-green-100 text-green-700 border-green-200',
+  rich: 'bg-blue-100 text-blue-700 border-blue-200',
+  moderate: 'bg-amber-100 text-amber-700 border-amber-200',
+  thin: 'bg-stone-100 text-stone-500 border-stone-200',
+}
+
+function QualityBadge({ score, level }: { score: number; level: string }) {
+  return (
+    <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${QUALITY_COLOURS[level] || QUALITY_COLOURS.thin}`} title={`Context quality: ${score}/100 (${level})`}>
+      Context: {score}
+    </span>
   )
 }

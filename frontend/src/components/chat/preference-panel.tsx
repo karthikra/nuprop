@@ -55,6 +55,7 @@ export function PreferencePanel({ proposal, templateConfig }: Props) {
   const prefs: ProposalPreferences = (proposal.preferences || {}) as ProposalPreferences
   const nc = templateConfig?.narrative || {}
   const oc = templateConfig?.output || {}
+  const contextOverrides = (proposal.pipeline_state?.context_overrides || []) as Array<{key: string; value: string; reason: string}>
 
   const handleChange = useCallback((key: string, value: string | string[]) => {
     clearTimeout(debounceRef.current)
@@ -85,6 +86,20 @@ export function PreferencePanel({ proposal, templateConfig }: Props) {
           </svg>
         </button>
       </div>
+
+      {/* Context-aware override banner */}
+      {contextOverrides.length > 0 ? (
+        <div className="px-4 py-3 bg-amber-50 border-b border-amber-100">
+          <p className="text-[10px] font-semibold text-amber-600 uppercase tracking-widest mb-1.5">Context-aware</p>
+          <div className="space-y-1.5">
+            {contextOverrides.map((o, i) => (
+              <p key={i} className="text-[10px] text-amber-700">
+                <span className="font-medium">{o.key.replace(/_/g, ' ')}:</span> {o.reason}
+              </p>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="p-4 space-y-5">
         {/* Letter */}

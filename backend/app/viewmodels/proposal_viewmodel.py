@@ -31,14 +31,27 @@ class ProposalViewModel(ViewModelBase):
             self.status_code = 404
             return None
 
+        # Auto-apply context-aware preference overrides
+        initial_prefs: dict = {}
+        context_overrides: list[dict] = []
+        if client.context_profile:
+            from app.services.context_intelligence import generate_preference_overrides
+            overrides = generate_preference_overrides(client.context_profile)
+            for o in overrides:
+                if o.key not in ("scope_note", "generate_one_pager", "negotiation_buffer"):
+                    initial_prefs[o.key] = o.value
+                context_overrides.append({"key": o.key, "value": o.value, "reason": o.reason})
+
         proposal = await self.repo.create(
             agency_id=agency_id,
             client_id=data.client_id,
             project_name=data.project_name,
             status=ProposalStatus.DRAFT.value,
+            preferences=initial_prefs,
             pipeline_state={
                 "current_phase": "brief",
                 "phases_completed": [],
+                "context_overrides": context_overrides,
                 "context": {},
             },
         )

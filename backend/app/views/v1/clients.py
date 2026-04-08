@@ -142,3 +142,48 @@ async def get_context_brief(
 
     brief = await svc.generate_context_brief(client.name, context_profile)
     return {"brief": brief, "has_context": True, "email_count": email_count}
+
+
+@router.get("/{client_id}/intelligence")
+async def get_client_intelligence(
+    client_id: UUID,
+    vm: ClientViewModel = Depends(get_vm),
+):
+    """Get full context intelligence: quality score, preference overrides, sentiment timeline."""
+    client = await vm.get_client(client_id)
+    if not client:
+        raise HTTPException(status_code=vm.status_code, detail=vm.error)
+
+    profile = client.context_profile or {}
+
+    from app.services.context_intelligence import (
+        compute_quality_score,
+        generate_preference_overrides,
+        build_sentiment_timeline,
+    )
+
+    quality = compute_quality_score(profile)
+    overrides = generate_preference_overrides(profile)
+    timeline = build_sentiment_timeline(profile)
+
+    # Source breakdown
+    sources = profile.get("_sources", {})
+    source_breakdown = {}
+    for source_name, source_data in sources.items():
+        if isinstance(source_data, dict):
+            count_keys = [k for k in source_data if k.endswith("_count")]
+            total = sum(source_data.get(k, 0) for k in count_keys)
+            source_breakdown[source_name] = total
+
+    return {
+        "quality_score": quality.to_dict(),
+        "preference_overrides": [
+            {"key": o.key, "value": o.value, "reason": o.reason, "confidence": o.confidence}
+            for o in overrides
+        ],
+        "sentiment_timeline": [
+            {"date": e.date, "sentiment": e.sentiment, "event": e.event}
+            for e in timeline
+        ],
+        "source_breakdown": source_breakdown,
+    }
