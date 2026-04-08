@@ -12,7 +12,10 @@ from app.infrastructure.db.models.base import IS_SQLITE, _uuid_default
 from app.infrastructure.db.repositories.agency_repo import AgencyRepository
 from app.infrastructure.db.repositories.client_repo import ClientRepository
 from app.infrastructure.db.repositories.email_index_repo import EmailIndexRepository
+from app.infrastructure.external.gcal_client import GCalClient
+from app.infrastructure.external.gdrive_client import GDriveClient
 from app.infrastructure.external.gmail_client import GmailClient
+from app.infrastructure.external.slack_client import SlackClient
 from app.services.ai.email_classifier import EmailClassifier
 from app.viewmodels.shared.viewmodel import ViewModelBase
 
@@ -246,3 +249,232 @@ class ConnectorViewModel(ViewModelBase):
                     if domain not in FREEMAIL_DOMAINS:
                         domain_map[domain] = client.name
         return domain_map
+
+    # ── Google Drive ─────────────────────────────────────────
+
+    async def sync_drive(self, agency_id: UUID) -> dict:
+        """Search Drive for documents about each client. Enriches context profiles."""
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            return {"error": "Agency not found"}
+
+        gmail = (agency.settings or {}).get("gmail", {})
+        if not gmail.get("connected") or not gmail.get("refresh_token"):
+            return {"error": "Google not connected (connect Gmail first — same OAuth)"}
+
+        refresh_token = self._decrypt(gmail["refresh_token"])
+        # Reuse Gmail's refresh token — Drive uses same Google account
+        from app.infrastructure.external.gmail_client import GmailClient
+        gmail_client = GmailClient()
+        access_token = await gmail_client.refresh_access_token(refresh_token)
+
+        drive = GDriveClient()
+        clients = await self.client_repo.search(agency_id, limit=500)
+        docs_found = 0
+
+        from app.services.context_service import ContextService
+        ctx_svc = ContextService()
+
+        for client in clients:
+            try:
+                docs = await drive.search_client_documents(access_token, client.name, max_results=5)
+                if not docs:
+                    continue
+
+                doc_summaries = "\n".join(
+                    f"- {d['name']} ({d['type']}, modified {d['modified'][:10]})"
+                    for d in docs
+                )
+
+                # Extract context from document names/descriptions
+                existing = client.context_profile or {}
+                extraction = await ctx_svc.extract_context(
+                    f"Documents found in Google Drive about {client.name}:\n{doc_summaries}\n\n"
+                    f"These documents suggest past work or ongoing relationship."
+                )
+                merged = await ctx_svc.merge_context(existing, extraction)
+
+                # Add drive source info
+                merged.setdefault("_sources", {})["drive"] = {
+                    "document_count": len(docs),
+                    "last_sync": datetime.now(timezone.utc).isoformat(),
+                }
+
+                await self.client_repo.update(client.id, context_profile=merged)
+                docs_found += len(docs)
+
+            except Exception:
+                continue
+
+        return {"clients_synced": len(clients), "documents_found": docs_found}
+
+    # ── Google Calendar ──────────────────────────────────────
+
+    async def sync_calendar(self, agency_id: UUID) -> dict:
+        """Analyze meeting patterns with each client. Enriches context profiles."""
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            return {"error": "Agency not found"}
+
+        gmail = (agency.settings or {}).get("gmail", {})
+        if not gmail.get("connected") or not gmail.get("refresh_token"):
+            return {"error": "Google not connected"}
+
+        refresh_token = self._decrypt(gmail["refresh_token"])
+        from app.infrastructure.external.gmail_client import GmailClient
+        gmail_client = GmailClient()
+        access_token = await gmail_client.refresh_access_token(refresh_token)
+
+        cal = GCalClient()
+        clients = await self.client_repo.search(agency_id, limit=500)
+        meetings_found = 0
+
+        for client in clients:
+            try:
+                stats = await cal.get_client_meeting_stats(access_token, client.name)
+                if stats["meeting_count"] == 0:
+                    continue
+
+                existing = client.context_profile or {}
+                # Update relationship info from calendar
+                rel = dict(existing.get("relationship", {}))
+                rel["meeting_frequency"] = stats["frequency"]
+                rel["meeting_count"] = stats["meeting_count"]
+                rel["last_meeting"] = stats["last_meeting"]
+                if stats["attendees"]:
+                    rel["meeting_attendees"] = stats["attendees"]
+                existing["relationship"] = rel
+
+                # Add calendar source info
+                existing.setdefault("_sources", {})["calendar"] = {
+                    "meeting_count": stats["meeting_count"],
+                    "frequency": stats["frequency"],
+                    "last_sync": datetime.now(timezone.utc).isoformat(),
+                }
+
+                await self.client_repo.update(client.id, context_profile=existing)
+                meetings_found += stats["meeting_count"]
+
+            except Exception:
+                continue
+
+        return {"clients_synced": len(clients), "meetings_found": meetings_found}
+
+    # ── Slack ────────────────────────────────────────────────
+
+    async def get_slack_auth_url(self, agency_id: UUID) -> str:
+        slack = SlackClient()
+        if not slack.is_configured:
+            self.error = "Slack OAuth not configured"
+            self.status_code = 400
+            return ""
+        return slack.get_auth_url(str(agency_id))
+
+    async def handle_slack_callback(self, agency_id: UUID, code: str) -> dict:
+        slack = SlackClient()
+        data = await slack.exchange_code(code)
+
+        access_token = data.get("access_token", "")
+        team = data.get("team", {})
+        workspace_name = team.get("name", "")
+
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            return {}
+
+        settings = dict(agency.settings or {})
+        settings["slack"] = {
+            "connected": True,
+            "workspace": workspace_name,
+            "access_token": self._encrypt(access_token),
+            "last_sync": None,
+        }
+        await self.agency_repo.update(agency_id, settings=settings)
+
+        return {"connected": True, "workspace": workspace_name}
+
+    async def get_slack_status(self, agency_id: UUID) -> dict:
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            return {"connected": False}
+        slack_settings = (agency.settings or {}).get("slack", {})
+        slack = SlackClient()
+        return {
+            "connected": slack_settings.get("connected", False),
+            "configured": slack.is_configured,
+            "workspace": slack_settings.get("workspace"),
+            "last_sync": slack_settings.get("last_sync"),
+        }
+
+    async def disconnect_slack(self, agency_id: UUID) -> None:
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            return
+        settings = dict(agency.settings or {})
+        settings.pop("slack", None)
+        await self.agency_repo.update(agency_id, settings=settings)
+
+    async def sync_slack(self, agency_id: UUID) -> dict:
+        """Search Slack for mentions of each client. Enriches context profiles."""
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            return {"error": "Agency not found"}
+
+        slack_settings = (agency.settings or {}).get("slack", {})
+        if not slack_settings.get("connected") or not slack_settings.get("access_token"):
+            return {"error": "Slack not connected"}
+
+        access_token = self._decrypt(slack_settings["access_token"])
+        slack = SlackClient()
+        clients = await self.client_repo.search(agency_id, limit=500)
+        mentions_found = 0
+
+        from app.services.context_service import ContextService
+        ctx_svc = ContextService()
+
+        for client in clients:
+            try:
+                messages = await slack.search_messages(access_token, client.name, count=10)
+                if not messages:
+                    continue
+
+                # Separate internal vs external discussions
+                internal = [m for m in messages if m.get("is_internal", True)]
+                external = [m for m in messages if not m.get("is_internal", True)]
+
+                slack_summary = ""
+                if internal:
+                    slack_summary += f"Internal Slack discussions about {client.name}:\n"
+                    for m in internal[:5]:
+                        slack_summary += f"- [{m.get('channel', '')}] {m.get('user', '')}: {m.get('text', '')[:200]}\n"
+                if external:
+                    slack_summary += f"\nShared channel messages with {client.name}:\n"
+                    for m in external[:5]:
+                        slack_summary += f"- {m.get('text', '')[:200]}\n"
+
+                if slack_summary:
+                    existing = client.context_profile or {}
+                    extraction = await ctx_svc.extract_context(slack_summary)
+                    merged = await ctx_svc.merge_context(existing, extraction)
+
+                    # Mark internal discussions source
+                    merged.setdefault("_sources", {})["slack"] = {
+                        "mention_count": len(messages),
+                        "internal_count": len(internal),
+                        "last_sync": datetime.now(timezone.utc).isoformat(),
+                    }
+
+                    await self.client_repo.update(client.id, context_profile=merged)
+                    mentions_found += len(messages)
+
+            except Exception:
+                continue
+
+        # Update last sync
+        settings = dict(agency.settings or {})
+        slack_s = dict(settings.get("slack", {}))
+        slack_s["last_sync"] = datetime.now(timezone.utc).isoformat()
+        settings["slack"] = slack_s
+        await self.agency_repo.update(agency_id, settings=settings)
+
+        return {"clients_synced": len(clients), "mentions_found": mentions_found}
