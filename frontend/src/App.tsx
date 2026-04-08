@@ -17,6 +17,8 @@ import { AnalyticsDetailPage } from './pages/analytics/detail'
 import { RateCardEditorPage } from './pages/rate-card/editor'
 import { TemplateListPage } from './pages/templates/list'
 import { TemplateEditorPage } from './pages/templates/editor'
+import { AgencySettingsPage } from './pages/settings/agency'
+import { GmailCallbackPage } from './pages/settings/gmail-callback'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -90,7 +92,8 @@ export default function App() {
               <Route path="/templates/:id" element={<TemplateEditorPage />} />
               <Route path="/analytics" element={<AnalyticsOverviewPage />} />
               <Route path="/analytics/:id" element={<AnalyticsDetailPage />} />
-              <Route path="/settings" element={<Placeholder title="Settings" />} />
+              <Route path="/settings" element={<AgencySettingsPage />} />
+              <Route path="/settings/gmail-callback" element={<GmailCallbackPage />} />
             </Route>
           </Route>
         </Routes>
@@ -99,11 +102,3 @@ export default function App() {
   )
 }
 
-function Placeholder({ title }: { title: string }) {
-  return (
-    <div>
-      <h1 className="text-2xl font-semibold text-stone-900">{title}</h1>
-      <p className="mt-1 text-sm text-stone-500">Coming in the next milestone.</p>
-    </div>
-  )
-}

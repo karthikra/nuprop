@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     # Web search
     SERPER_API_KEY: str = ""
 
+    # Google OAuth (Gmail connector)
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:5173/settings/gmail-callback"
+
+    # Encryption for OAuth tokens
+    ENCRYPTION_KEY: str = ""
+
     # Auth
     JWT_SECRET_KEY: str = "change-me-in-production"
     JWT_ALGORITHM: str = "HS256"

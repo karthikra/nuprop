@@ -185,3 +185,46 @@ class ContextService:
             merged[key] = existing_items
 
         return merged
+
+    async def enrich_context_with_emails(
+        self,
+        context_profile: dict,
+        email_summaries: list[dict],
+    ) -> dict:
+        """Merge email intelligence into existing context profile via Claude."""
+        if not self._llm.is_configured or not email_summaries:
+            return context_profile
+
+        import json
+        emails_text = "\n".join(
+            f"- [{e.get('date', '')}] ({e.get('message_type', 'general')}, {e.get('sentiment', 'neutral')}) {e.get('subject', '')}: {e.get('summary', '')}"
+            for e in email_summaries[:30]  # Cap at 30 most recent
+        )
+
+        prompt = """Given an existing Client Context Profile and recent email thread summaries, extract any NEW intelligence from the emails that is NOT already in the profile.
+
+Return an updated profile JSON that integrates the email insights. Focus on:
+- New contacts mentioned in emails
+- Budget/pricing signals from negotiation emails
+- Sentiment shifts (improving or deteriorating relationship)
+- Project references not in past_work
+- Decision-making clues (who approves, how long cycles take)
+- Preferences revealed (communication style, format preferences)
+
+ONLY add genuinely new information. Do not repeat what's already in the profile."""
+
+        try:
+            result = await self._llm.complete_json(
+                system=prompt,
+                messages=[{
+                    "role": "user",
+                    "content": f"Existing profile:\n```json\n{json.dumps(context_profile, indent=2, default=str)}\n```\n\nRecent emails:\n{emails_text}",
+                }],
+                max_tokens=3000,
+            )
+            if isinstance(result, dict):
+                return await self.merge_context(context_profile, result)
+        except Exception:
+            pass
+
+        return context_profile

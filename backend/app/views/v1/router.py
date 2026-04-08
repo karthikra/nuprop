@@ -7,6 +7,7 @@ from app.views.v1.analytics import router as analytics_router
 from app.views.v1.auth import router as auth_router
 from app.views.v1.chat import router as chat_router
 from app.views.v1.clients import router as clients_router
+from app.views.v1.connectors import router as connectors_router
 from app.views.v1.downloads import router as downloads_router
 from app.views.v1.health import router as health_router
 from app.views.v1.notifications import router as notifications_router
@@ -28,3 +29,4 @@ api_router.include_router(rate_cards_router)
 api_router.include_router(templates_router)
 api_router.include_router(analytics_router)
 api_router.include_router(notifications_router)
+api_router.include_router(connectors_router)

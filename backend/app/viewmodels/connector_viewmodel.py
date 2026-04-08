@@ -1,0 +1,248 @@
+from __future__ import annotations
+
+import time
+from datetime import datetime, timezone
+from uuid import UUID
+
+from fastapi import Request
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import get_settings
+from app.infrastructure.db.models.base import IS_SQLITE, _uuid_default
+from app.infrastructure.db.repositories.agency_repo import AgencyRepository
+from app.infrastructure.db.repositories.client_repo import ClientRepository
+from app.infrastructure.db.repositories.email_index_repo import EmailIndexRepository
+from app.infrastructure.external.gmail_client import GmailClient
+from app.services.ai.email_classifier import EmailClassifier
+from app.viewmodels.shared.viewmodel import ViewModelBase
+
+FREEMAIL_DOMAINS = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com", "aol.com", "protonmail.com"}
+
+
+class ConnectorViewModel(ViewModelBase):
+    def __init__(self, request: Request, db: AsyncSession):
+        super().__init__(request, db)
+        self._gmail = GmailClient()
+        self._agency_repo: AgencyRepository | None = None
+        self._client_repo: ClientRepository | None = None
+        self._email_repo: EmailIndexRepository | None = None
+
+    @property
+    def agency_repo(self) -> AgencyRepository:
+        if not self._agency_repo:
+            self._agency_repo = AgencyRepository(self._db)
+        return self._agency_repo
+
+    @property
+    def client_repo(self) -> ClientRepository:
+        if not self._client_repo:
+            self._client_repo = ClientRepository(self._db)
+        return self._client_repo
+
+    @property
+    def email_repo(self) -> EmailIndexRepository:
+        if not self._email_repo:
+            self._email_repo = EmailIndexRepository(self._db)
+        return self._email_repo
+
+    # ── Token encryption ─────────────────────────────────────
+
+    def _encrypt(self, text: str) -> str:
+        key = get_settings().ENCRYPTION_KEY
+        if not key:
+            return text  # No encryption in dev
+        from cryptography.fernet import Fernet
+        return Fernet(key.encode()).encrypt(text.encode()).decode()
+
+    def _decrypt(self, text: str) -> str:
+        key = get_settings().ENCRYPTION_KEY
+        if not key:
+            return text
+        from cryptography.fernet import Fernet
+        return Fernet(key.encode()).decrypt(text.encode()).decode()
+
+    # ── OAuth flow ───────────────────────────────────────────
+
+    async def get_auth_url(self, agency_id: UUID) -> str:
+        if not self._gmail.is_configured:
+            self.error = "Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET."
+            self.status_code = 400
+            return ""
+        return self._gmail.get_auth_url(str(agency_id))
+
+    async def handle_callback(self, agency_id: UUID, code: str) -> dict:
+        tokens = await self._gmail.exchange_code(code)
+        access_token = tokens["access_token"]
+        refresh_token = tokens.get("refresh_token", "")
+
+        email = await self._gmail.get_user_email(access_token)
+
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            self.error = "Agency not found"
+            self.status_code = 404
+            return {}
+
+        settings = dict(agency.settings or {})
+        settings["gmail"] = {
+            "connected": True,
+            "email": email,
+            "refresh_token": self._encrypt(refresh_token),
+            "last_sync": None,
+            "email_count": 0,
+        }
+        await self.agency_repo.update(agency_id, settings=settings)
+
+        return {"connected": True, "email": email, "last_sync": None, "email_count": 0}
+
+    async def get_status(self, agency_id: UUID) -> dict:
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            return {"connected": False, "configured": self._gmail.is_configured}
+
+        gmail = (agency.settings or {}).get("gmail", {})
+        email_count = await self.email_repo.count_by_agency(agency_id)
+
+        return {
+            "connected": gmail.get("connected", False),
+            "configured": self._gmail.is_configured,
+            "email": gmail.get("email"),
+            "last_sync": gmail.get("last_sync"),
+            "email_count": email_count,
+        }
+
+    async def disconnect(self, agency_id: UUID) -> None:
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            return
+
+        gmail = (agency.settings or {}).get("gmail", {})
+        if gmail.get("refresh_token"):
+            try:
+                token = self._decrypt(gmail["refresh_token"])
+                await self._gmail.revoke_token(token)
+            except Exception:
+                pass
+
+        settings = dict(agency.settings or {})
+        settings.pop("gmail", None)
+        await self.agency_repo.update(agency_id, settings=settings)
+        await self.email_repo.delete_by_agency(agency_id)
+
+    # ── Sync ─────────────────────────────────────────────────
+
+    async def sync_emails(self, agency_id: UUID) -> dict:
+        start = time.time()
+
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            self.error = "Agency not found"
+            self.status_code = 404
+            return {}
+
+        gmail = (agency.settings or {}).get("gmail", {})
+        if not gmail.get("connected") or not gmail.get("refresh_token"):
+            self.error = "Gmail not connected"
+            self.status_code = 400
+            return {}
+
+        refresh_token = self._decrypt(gmail["refresh_token"])
+        access_token = await self._gmail.refresh_access_token(refresh_token)
+
+        # Get client domains
+        clients = await self.client_repo.search(agency_id, limit=500)
+        domain_map = self._extract_domains(clients)
+        if not domain_map:
+            return {"new_emails": 0, "total_emails": 0, "domains_synced": [], "duration_seconds": 0}
+
+        # Parse last_sync
+        since = None
+        if gmail.get("last_sync"):
+            try:
+                since = datetime.fromisoformat(str(gmail["last_sync"]))
+            except Exception:
+                pass
+
+        classifier = EmailClassifier()
+        total_new = 0
+        synced_domains = []
+
+        for domain, client_name in domain_map.items():
+            try:
+                messages = await self._gmail.fetch_messages_for_domain(access_token, domain, since, limit=100)
+                if not messages:
+                    continue
+
+                # Filter out already-indexed
+                msg_ids = [m["id"] for m in messages]
+                existing = await self.email_repo.get_existing_message_ids(agency_id, msg_ids)
+                new_messages = [m for m in messages if m["id"] not in existing]
+
+                if not new_messages:
+                    synced_domains.append(domain)
+                    continue
+
+                # Classify
+                classifications = await classifier.classify_batch(new_messages, concurrency=5)
+
+                # Store
+                now = datetime.now(timezone.utc)
+                for msg, cls in zip(new_messages, classifications):
+                    from app.infrastructure.db.models.email_index import EmailIndex
+                    email = EmailIndex(
+                        id=_uuid_default(),
+                        agency_id=str(agency_id) if IS_SQLITE else agency_id,
+                        gmail_message_id=msg["id"],
+                        gmail_thread_id=msg.get("thread_id", ""),
+                        client_domain=domain,
+                        client_name=client_name,
+                        message_type=cls["message_type"],
+                        sentiment=cls["sentiment"],
+                        priority=cls["priority"],
+                        summary=cls["summary"],
+                        entities=cls["entities"],
+                        from_address=msg.get("from", ""),
+                        to_addresses=msg.get("to", "").split(","),
+                        subject=msg.get("subject", ""),
+                        date=msg["date"] if isinstance(msg["date"], datetime) else now,
+                        has_attachments=msg.get("has_attachments", False),
+                        synced_at=now,
+                    )
+                    self._db.add(email)
+
+                total_new += len(new_messages)
+                synced_domains.append(domain)
+
+            except Exception:
+                continue  # Don't let one domain failure stop the whole sync
+
+        # Update last_sync
+        settings = dict(agency.settings or {})
+        gmail_settings = dict(settings.get("gmail", {}))
+        gmail_settings["last_sync"] = datetime.now(timezone.utc).isoformat()
+        email_count = await self.email_repo.count_by_agency(agency_id)
+        gmail_settings["email_count"] = email_count
+        settings["gmail"] = gmail_settings
+        await self.agency_repo.update(agency_id, settings=settings)
+
+        duration = round(time.time() - start, 1)
+
+        return {
+            "new_emails": total_new,
+            "total_emails": email_count,
+            "domains_synced": synced_domains,
+            "duration_seconds": duration,
+        }
+
+    def _extract_domains(self, clients: list) -> dict[str, str]:
+        """Extract email domains from client contacts. Returns {domain: client_name}."""
+        domain_map: dict[str, str] = {}
+        for client in clients:
+            contacts = client.contacts or []
+            for contact in contacts:
+                if isinstance(contact, dict) and contact.get("email"):
+                    email = contact["email"]
+                    domain = email.split("@")[-1].lower()
+                    if domain not in FREEMAIL_DOMAINS:
+                        domain_map[domain] = client.name
+        return domain_map
