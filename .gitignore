@@ -29,3 +29,6 @@ backend/outputs/
 
 # Alembic
 alembic/versions/__pycache__/
+
+.claude
+.github
