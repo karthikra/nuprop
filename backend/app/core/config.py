@@ -1,16 +1,22 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_SHARED_ENV = Path.home() / "env" / ".env.dev"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(
+            str(_SHARED_ENV),                # shared dev keys (loaded first, lower priority)
+            ".env",                          # project-specific overrides (loaded last, wins)
+        ),
         env_file_encoding="utf-8",
-        extra="ignore",
+        extra="ignore",                      # ignore vars NUPROP doesn't declare
     )
 
     # App
