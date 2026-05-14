@@ -1,0 +1,180 @@
+"""Shared pytest fixtures for the NUPROP backend test suite.
+
+The test environment is configured at *import time* — before any ``app`` module
+is imported — so the application's module-level ``engine`` /
+``async_session_factory`` (in ``app.infrastructure.db.database``) bind to an
+isolated temp-file SQLite database instead of the real dev database. This also
+means code that uses ``async_session_factory`` directly (``track.py``, the
+WebSocket endpoint) runs against the test database too.
+"""
+
+from __future__ import annotations
+
+import os
+import tempfile
+from dataclasses import dataclass
+
+# ── Test environment — MUST be set before importing anything from ``app`` ────
+_TMP_DB_FD, _TMP_DB_PATH = tempfile.mkstemp(suffix=".db", prefix="nuprop_test_")
+os.close(_TMP_DB_FD)
+os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TMP_DB_PATH}"
+os.environ["ANTHROPIC_API_KEY"] = ""          # AI services fall back to non-LLM paths
+os.environ["JWT_SECRET_KEY"] = "test-secret-key-not-for-production"
+os.environ["ENVIRONMENT"] = "test"
+os.environ["REDIS_ENABLED"] = "false"
+os.environ["DEBUG"] = "false"                 # keep SQLAlchemy engine echo quiet
+
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
+
+from app.infrastructure.db.database import Base, async_session_factory, engine  # noqa: E402
+from app.infrastructure.db.models import *  # noqa: E402,F401,F403  — register every model on Base.metadata
+from app.infrastructure.db.models.template import StrategyTemplate  # noqa: E402
+from app.infrastructure.external.anthropic_client import AnthropicClient  # noqa: E402
+from app.main import app  # noqa: E402
+
+API = "/api/v1"
+
+
+# ── No-network guard ─────────────────────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """Hard guard: no test may make a real Anthropic/LLM network call.
+
+    ``ANTHROPIC_API_KEY`` is already empty so ``is_configured`` is False, but
+    this makes any accidental call fail loudly instead of hanging on the
+    network. Tests that exercise an AI path monkeypatch the *service* method
+    (e.g. ``BriefAnalyzer.analyze``) or re-patch ``is_configured`` themselves —
+    those patches are applied after this fixture and therefore win.
+    """
+
+    async def _blocked(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("Real Anthropic API call attempted during a test")
+
+    monkeypatch.setattr(AnthropicClient, "complete", _blocked, raising=False)
+    monkeypatch.setattr(AnthropicClient, "complete_json", _blocked, raising=False)
+    monkeypatch.setattr(AnthropicClient, "stream", _blocked, raising=False)
+    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: False))
+
+
+# ── Database / schema ────────────────────────────────────────────────────────
+@pytest_asyncio.fixture
+async def _schema():
+    """Drop + recreate every table around each test for full isolation."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+
+
+@pytest_asyncio.fixture
+async def db(_schema) -> AsyncSession:
+    """A plain async session for repository / viewmodel / service tests."""
+    async with async_session_factory() as session:
+        yield session
+
+
+@pytest_asyncio.fixture
+async def client(_schema) -> AsyncClient:
+    """An httpx client wired to the FastAPI app over ASGI (no real socket)."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def seeded_templates(db) -> list[StrategyTemplate]:
+    """Insert two deterministic system strategy templates.
+
+    Used by template-listing and template-matcher tests so they don't depend on
+    the optional ``web_app_seed/veeville-templates.json`` file being present.
+    """
+    templates = [
+        StrategyTemplate(
+            template_key="brand_identity",
+            name="Brand Identity",
+            description="Full brand identity and visual system",
+            category="brand",
+            config={
+                "brief_intake": {
+                    "auto_detect_signals": ["rebrand", "logo", "brand guidelines", "visual identity"]
+                },
+                "narrative": {"letter_strategy": "vision"},
+                "cost_model": {"default_multipliers": []},
+                "output": {"site_theme": "editorial"},
+            },
+            is_system=True,
+            agency_id=None,
+        ),
+        StrategyTemplate(
+            template_key="campaign",
+            name="Campaign",
+            description="Integrated marketing campaign",
+            category="campaign",
+            config={
+                "brief_intake": {"auto_detect_signals": ["campaign", "launch", "advertising"]},
+                "output": {"site_theme": "bold"},
+            },
+            is_system=True,
+            agency_id=None,
+        ),
+    ]
+    for t in templates:
+        db.add(t)
+    await db.commit()
+    return templates
+
+
+# ── Auth helpers ─────────────────────────────────────────────────────────────
+@dataclass
+class RegisteredUser:
+    token: str
+    user_id: str
+    agency_id: str
+    email: str
+    headers: dict
+
+
+async def _register(client: AsyncClient, *, email: str, agency_name: str) -> RegisteredUser:
+    resp = await client.post(
+        f"{API}/auth/register",
+        json={
+            "email": email,
+            "password": "s3cret-password",
+            "full_name": "Test Owner",
+            "agency_name": agency_name,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    data = resp.json()
+    return RegisteredUser(
+        token=data["access_token"],
+        user_id=data["user_id"],
+        agency_id=data["agency_id"],
+        email=email,
+        headers={"Authorization": f"Bearer {data['access_token']}"},
+    )
+
+
+@pytest_asyncio.fixture
+async def registered(client) -> RegisteredUser:
+    """A registered user + agency (the "primary" agency in tests)."""
+    return await _register(client, email="owner@acme.example.com", agency_name="Acme Agency")
+
+
+@pytest_asyncio.fixture
+async def second_agency(client) -> RegisteredUser:
+    """A second, unrelated agency — used for cross-agency isolation tests."""
+    return await _register(client, email="rival@globex.example.com", agency_name="Globex Inc")
+
+
+# ── Session teardown ─────────────────────────────────────────────────────────
+def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
+    try:
+        os.unlink(_TMP_DB_PATH)
+    except OSError:
+        pass
