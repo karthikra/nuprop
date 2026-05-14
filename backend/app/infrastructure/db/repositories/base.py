@@ -50,7 +50,10 @@ class BaseRepository(Generic[T]):
         return instance
 
     async def update(self, id: UUID, **data: object) -> T | None:
-        data = {k: v for k, v in data.items() if v is not None}
+        # Write exactly what the caller passes. Callers that only want to
+        # update a subset use ``model_dump(exclude_unset=True)``, so absent
+        # fields are never in ``data``; an explicit ``None`` here means
+        # "clear this column" and is honoured.
         if not data:
             return await self.get_by_id(id)
         await self.session.execute(

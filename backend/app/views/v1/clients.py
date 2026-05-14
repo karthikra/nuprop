@@ -41,8 +41,12 @@ async def create_client(
 
 
 @router.get("/{client_id}", response_model=ClientResponse)
-async def get_client(client_id: UUID, vm: ClientViewModel = Depends(get_vm)):
-    client = await vm.get_client(client_id)
+async def get_client(
+    client_id: UUID,
+    agency_id: UUID = Depends(get_current_agency_id),
+    vm: ClientViewModel = Depends(get_vm),
+):
+    client = await vm.get_client(client_id, agency_id)
     if not client:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
     return client
@@ -52,17 +56,22 @@ async def get_client(client_id: UUID, vm: ClientViewModel = Depends(get_vm)):
 async def update_client(
     client_id: UUID,
     data: ClientUpdate,
+    agency_id: UUID = Depends(get_current_agency_id),
     vm: ClientViewModel = Depends(get_vm),
 ):
-    client = await vm.update_client(client_id, data)
+    client = await vm.update_client(client_id, agency_id, data)
     if not client:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
     return client
 
 
 @router.delete("/{client_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_client(client_id: UUID, vm: ClientViewModel = Depends(get_vm)):
-    if not await vm.delete_client(client_id):
+async def delete_client(
+    client_id: UUID,
+    agency_id: UUID = Depends(get_current_agency_id),
+    vm: ClientViewModel = Depends(get_vm),
+):
+    if not await vm.delete_client(client_id, agency_id):
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
 
 
@@ -74,10 +83,11 @@ class ContextInput(BaseModel):
 async def add_context(
     client_id: UUID,
     body: ContextInput,
+    agency_id: UUID = Depends(get_current_agency_id),
     vm: ClientViewModel = Depends(get_vm),
 ):
     """Parse pasted text into structured context and merge into client profile."""
-    client = await vm.get_client(client_id)
+    client = await vm.get_client(client_id, agency_id)
     if not client:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
 
@@ -92,7 +102,7 @@ async def add_context(
     merged = await svc.merge_context(existing, extraction)
 
     # Save to client
-    updated = await vm.update_client(client_id, ClientUpdate(context_profile=merged))  # type: ignore
+    updated = await vm.update_client(client_id, agency_id, ClientUpdate(context_profile=merged))  # type: ignore
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update context")
     return updated
@@ -102,11 +112,12 @@ async def add_context(
 async def get_context_brief(
     client_id: UUID,
     include_emails: bool = False,
+    agency_id: UUID = Depends(get_current_agency_id),
     vm: ClientViewModel = Depends(get_vm),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate a natural-language Context Brief. Optionally enriches with email data."""
-    client = await vm.get_client(client_id)
+    client = await vm.get_client(client_id, agency_id)
     if not client:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
 
@@ -147,10 +158,11 @@ async def get_context_brief(
 @router.get("/{client_id}/intelligence")
 async def get_client_intelligence(
     client_id: UUID,
+    agency_id: UUID = Depends(get_current_agency_id),
     vm: ClientViewModel = Depends(get_vm),
 ):
     """Get full context intelligence: quality score, preference overrides, sentiment timeline."""
-    client = await vm.get_client(client_id)
+    client = await vm.get_client(client_id, agency_id)
     if not client:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
 

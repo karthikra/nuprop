@@ -59,7 +59,7 @@ class AgencyViewModel(ViewModelBase):
                 name=data.get("name", agency.name),
                 colours=data.get("colours", agency.colours),
                 fonts=data.get("fonts", agency.fonts),
-                logo_url=data.get("logo_url"),
+                logo_url=data.get("logo_url", agency.logo_url),
             )
 
         elif step_data.step == 2:

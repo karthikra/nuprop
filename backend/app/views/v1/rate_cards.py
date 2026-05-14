@@ -45,9 +45,10 @@ async def list_rate_card_versions(
 async def update_rate_card(
     rate_card_id: UUID,
     data: RateCardUpdate,
+    agency_id: UUID = Depends(get_current_agency_id),
     vm: RateCardViewModel = Depends(get_vm),
 ):
-    rc = await vm.update_rate_card(rate_card_id, data)
+    rc = await vm.update_rate_card(rate_card_id, agency_id, data)
     if not rc:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
     return rc

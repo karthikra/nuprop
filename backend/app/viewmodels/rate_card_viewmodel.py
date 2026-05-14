@@ -32,13 +32,14 @@ class RateCardViewModel(ViewModelBase):
     async def list_versions(self, agency_id: UUID) -> list[RateCard]:
         return await self.repo.list_versions(agency_id)
 
-    async def update_rate_card(self, rate_card_id: UUID, data: RateCardUpdate) -> RateCard | None:
-        update_data = data.model_dump(exclude_unset=True)
-        rc = await self.repo.update(rate_card_id, **update_data)
-        if not rc:
+    async def update_rate_card(self, rate_card_id: UUID, agency_id: UUID, data: RateCardUpdate) -> RateCard | None:
+        existing = await self.repo.get_by_id(rate_card_id)
+        if not existing or str(existing.agency_id) != str(agency_id):
             self.error = "Rate card not found"
             self.status_code = 404
-        return rc
+            return None
+        update_data = data.model_dump(exclude_unset=True)
+        return await self.repo.update(rate_card_id, **update_data)
 
     async def create_version(self, agency_id: UUID, data: CreateVersionRequest) -> RateCard:
         current = await self.repo.get_active(agency_id)

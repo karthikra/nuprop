@@ -39,11 +39,12 @@ class ClientViewModel(ViewModelBase):
     ) -> list[Client]:
         return await self.repo.search(agency_id, query, industry, tag, skip, limit)
 
-    async def get_client(self, client_id: UUID) -> Client | None:
+    async def get_client(self, client_id: UUID, agency_id: UUID) -> Client | None:
         client = await self.repo.get_by_id(client_id)
-        if not client:
+        if not client or str(client.agency_id) != str(agency_id):
             self.error = "Client not found"
             self.status_code = 404
+            return None
         return client
 
     async def create_client(self, agency_id: UUID, data: ClientCreate) -> Client:
@@ -60,21 +61,17 @@ class ClientViewModel(ViewModelBase):
         self.status_code = 201
         return client
 
-    async def update_client(self, client_id: UUID, data: ClientUpdate) -> Client | None:
+    async def update_client(self, client_id: UUID, agency_id: UUID, data: ClientUpdate) -> Client | None:
+        if not await self.get_client(client_id, agency_id):
+            return None
         update_data = data.model_dump(exclude_unset=True)
         if "contacts" in update_data and update_data["contacts"] is not None:
             update_data["contacts"] = [c if isinstance(c, dict) else c.model_dump() for c in update_data["contacts"]]
         if "name" in update_data:
             update_data["slug"] = _slugify(update_data["name"])
-        client = await self.repo.update(client_id, **update_data)
-        if not client:
-            self.error = "Client not found"
-            self.status_code = 404
-        return client
+        return await self.repo.update(client_id, **update_data)
 
-    async def delete_client(self, client_id: UUID) -> bool:
-        deleted = await self.repo.delete(client_id)
-        if not deleted:
-            self.error = "Client not found"
-            self.status_code = 404
-        return deleted
+    async def delete_client(self, client_id: UUID, agency_id: UUID) -> bool:
+        if not await self.get_client(client_id, agency_id):
+            return False
+        return await self.repo.delete(client_id)
