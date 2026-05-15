@@ -81,4 +81,17 @@ describe('chat-store', () => {
     expect(next.isConnected).toBe(false)
     expect(next.progress).toEqual([])
   })
+
+  it('updateMessage replaces a message in the messages list by id', () => {
+    useChatStore.getState().addMessage(msg('m1', { content: 'orig' }))
+    useChatStore.getState().updateMessage(msg('m1', { content: 'updated' }))
+    expect(useChatStore.getState().messages[0].content).toBe('updated')
+  })
+
+  it('updateMessage is a no-op when the message id is not present', () => {
+    useChatStore.getState().addMessage(msg('m1', { content: 'orig' }))
+    useChatStore.getState().updateMessage(msg('m999', { content: 'ghost' }))
+    expect(useChatStore.getState().messages).toHaveLength(1)
+    expect(useChatStore.getState().messages[0].content).toBe('orig')
+  })
 })

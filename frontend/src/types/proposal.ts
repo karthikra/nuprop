@@ -69,7 +69,7 @@ export interface ChatMessage {
 }
 
 export interface WSMessage {
-  type: 'new_message' | 'phase_change' | 'typing' | 'progress' | 'pong' | 'error'
+  type: 'new_message' | 'message_updated' | 'phase_change' | 'typing' | 'progress' | 'pong' | 'error'
   message?: ChatMessage
   phase?: string
   typing?: boolean

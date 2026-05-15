@@ -4,6 +4,7 @@ import type { WSMessage } from '../types/proposal'
 
 export function useProposalWebSocket(proposalId: string | undefined) {
   const addMessage = useChatStore((s) => s.addMessage)
+  const updateMessage = useChatStore((s) => s.updateMessage)
   const setPipelinePhase = useChatStore((s) => s.setPipelinePhase)
   const setConnected = useChatStore((s) => s.setConnected)
   const setTyping = useChatStore((s) => s.setTyping)
@@ -46,6 +47,8 @@ export function useProposalWebSocket(proposalId: string | undefined) {
           if (data.type === 'new_message' && data.message) {
             addMessage(data.message)
             setTyping(false)
+          } else if (data.type === 'message_updated' && data.message) {
+            updateMessage(data.message)
           } else if (data.type === 'phase_change' && data.phase) {
             setPipelinePhase(data.phase)
           } else if (data.type === 'typing') {
@@ -80,5 +83,5 @@ export function useProposalWebSocket(proposalId: string | undefined) {
       }
       setConnected(false)
     }
-  }, [proposalId, addMessage, setPipelinePhase, setConnected, setTyping, updateProgress])
+  }, [proposalId, addMessage, updateMessage, setPipelinePhase, setConnected, setTyping, updateProgress])
 }

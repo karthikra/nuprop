@@ -91,6 +91,21 @@ describe('useProposalWebSocket', () => {
     expect(useChatStore.getState().isTyping).toBe(false)
   })
 
+  it('dispatches a message_updated event by replacing the message in the store', () => {
+    renderHook(() => useProposalWebSocket('prop-1'))
+    const original = {
+      id: 'm1', proposal_id: 'prop-1', role: 'assistant' as const, message_type: 'text',
+      content: 'original', extra_data: {}, phase: null, created_at: '2026-01-01T00:00:00Z',
+    }
+    act(() => MockWebSocket.instances[0].emit({ type: 'new_message', message: original }))
+    expect(useChatStore.getState().messages[0].content).toBe('original')
+
+    const updated = { ...original, content: 'updated' }
+    act(() => MockWebSocket.instances[0].emit({ type: 'message_updated', message: updated }))
+    expect(useChatStore.getState().messages).toHaveLength(1)
+    expect(useChatStore.getState().messages[0].content).toBe('updated')
+  })
+
   it('dispatches a phase_change event into the chat store', () => {
     renderHook(() => useProposalWebSocket('prop-1'))
     act(() => MockWebSocket.instances[0].emit({ type: 'phase_change', phase: 'research' }))

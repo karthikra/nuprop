@@ -11,6 +11,7 @@ interface ChatState {
 
   setMessages: (msgs: ChatMessage[]) => void
   addMessage: (msg: ChatMessage) => void
+  updateMessage: (msg: ChatMessage) => void
   setPipelinePhase: (phase: string) => void
   setConnected: (connected: boolean) => void
   setSending: (sending: boolean) => void
@@ -33,6 +34,15 @@ export const useChatStore = create<ChatState>((set) => ({
     set((state) => {
       if (state.messages.some((m) => m.id === msg.id)) return state
       return { messages: [...state.messages, msg] }
+    }),
+
+  updateMessage: (msg) =>
+    set((state) => {
+      const idx = state.messages.findIndex((m) => m.id === msg.id)
+      if (idx < 0) return {}
+      const next = [...state.messages]
+      next[idx] = msg
+      return { messages: next }
     }),
 
   setPipelinePhase: (phase) => set({ pipelinePhase: phase }),
