@@ -24,6 +24,8 @@ os.environ["ENVIRONMENT"] = "test"
 os.environ["REDIS_ENABLED"] = "false"
 os.environ["DEBUG"] = "false"                 # keep SQLAlchemy engine echo quiet
 
+from unittest.mock import AsyncMock  # noqa: E402
+
 import pytest  # noqa: E402
 import pytest_asyncio  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
@@ -84,6 +86,35 @@ async def client(_schema) -> AsyncClient:
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
+
+
+@pytest.fixture
+def arq_pool():
+    """Install a mock ARQ pool on app.state so enqueue calls are captured.
+
+    The ASGITransport test client does not run the FastAPI lifespan, so
+    ``app.state.arq_pool`` is unset by default; tests that exercise the enqueue
+    paths require this fixture explicitly.
+    """
+    pool = AsyncMock()
+    app.state.arq_pool = pool
+    yield pool
+    if hasattr(app.state, "arq_pool"):
+        delattr(app.state, "arq_pool")
+
+
+@pytest.fixture(autouse=True)
+def ws_publish_spy(monkeypatch):
+    """Stub events.publish so pipeline code never needs a real Redis in tests."""
+    published: list[tuple[str, dict]] = []
+
+    async def _spy(redis, proposal_id, payload):  # noqa: ANN001
+        published.append((str(proposal_id), payload))
+
+    monkeypatch.setattr("app.infrastructure.queue.events.publish", _spy)
+    # PipelineService imports `publish` by name — patch that binding too
+    monkeypatch.setattr("app.services.pipeline_service.publish", _spy, raising=False)
+    return published
 
 
 @pytest_asyncio.fixture
