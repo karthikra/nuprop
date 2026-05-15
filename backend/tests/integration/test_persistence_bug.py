@@ -4,11 +4,18 @@ Previously the whole pipeline ran in one request transaction committed only at
 request end, so a phase's writes were not visible to a concurrent reader until
 the entire request finished. Now each phase commits in its own session before it
 broadcasts — proven here by reading the written field from a *separate* session.
+
+The original test mocked ``ResearchAgent.research_client`` (the agent-level path),
+which the streaming rewrite of ``run_research`` no longer calls. This version mocks
+the new path: the Haiku planner + the Opus streaming call on ``ai.client.messages.stream``.
+The structural invariant is identical: the ``research_findings`` broadcast (a
+``new_message`` event) must follow the ``proposal.research`` commit.
 """
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 from app.infrastructure.db.database import async_session_factory
 from app.infrastructure.db.repositories.agency_repo import AgencyRepository
@@ -17,9 +24,41 @@ from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.services.pipeline_service import PipelineService
 
 
-async def test_phase_commits_before_it_would_broadcast(db, monkeypatch):
-    from app.services.ai.research_agent import ResearchAgent
+def _start(content_block):
+    return SimpleNamespace(type="content_block_start", content_block=content_block)
 
+
+def _delta(text):
+    return SimpleNamespace(
+        type="content_block_delta",
+        delta=SimpleNamespace(type="text_delta", text=text),
+    )
+
+
+def _stop(content_block):
+    return SimpleNamespace(type="content_block_stop", content_block=content_block)
+
+
+class _MockStreamContext:
+    """Stands in for the async context manager returned by messages.stream(...)."""
+
+    def __init__(self, events):
+        self._events = events
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return None
+
+    def __aiter__(self):
+        async def _gen():
+            for ev in self._events:
+                yield ev
+        return _gen()
+
+
+async def test_phase_commits_before_it_would_broadcast(db, monkeypatch):
     agency = await AgencyRepository(db).create(name="P Agency", slug="p-agency")
     client = await ClientRepository(db).create(agency_id=agency.id, name="C", slug="c")
     proposal = await ProposalRepository(db).create(
@@ -30,17 +69,30 @@ async def test_phase_commits_before_it_would_broadcast(db, monkeypatch):
     await db.commit()
     pid = proposal.id
 
-    research_text = "## Research\nCommitted before broadcast."
+    research_text = "Acme rebranded in 2024. Committed before broadcast."
 
-    async def fake_research(self, *a, **k):
-        return research_text
+    # Mock the Haiku planner.
+    monkeypatch.setattr(
+        "app.services.pipeline_service.generate_research_plan",
+        AsyncMock(return_value={"queries": ["Acme rebrand"], "rationale": "..."}),
+    )
 
-    monkeypatch.setattr(ResearchAgent, "research_client", fake_research)
+    # Mock the Opus streaming call — emit a single text block whose body becomes
+    # proposal.research.
+    fake_events = [
+        _delta(research_text),
+        _stop(SimpleNamespace(type="text", text=research_text, citations=[])),
+    ]
+    mock_ai = MagicMock()
+    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext(fake_events))
+    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-opus-4-7")
+    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
 
-    # Record every emit with whether the committed write was visible at that point.
-    # The invariant is: any "complete" / state-change broadcast must follow the
-    # phase commit (the bug was that they did not). A "searching" progress event
-    # legitimately fires *before* the write — it's a "starting work" signal.
+    # Record every emit with whether the committed research write was visible
+    # at that point. The invariant: any broadcast of the *research_findings*
+    # message must follow the commit of ``proposal.research`` (the bug was that
+    # they did not). Plan / activity-log emits legitimately fire before the
+    # research field is written.
     observations: list[tuple[dict, bool]] = []
 
     async def _emit_spy(redis, proposal_id, payload):  # noqa: ANN001
@@ -55,10 +107,13 @@ async def test_phase_commits_before_it_would_broadcast(db, monkeypatch):
     await svc.run_research(pid)
 
     assert observations, "run_research should emit at least one WS event"
-    # The phase-completion broadcast must see the committed write.
-    completion_emits = [
+    # The findings broadcast must see the committed write.
+    findings_emits = [
         committed for payload, committed in observations
-        if payload.get("status") == "complete"
+        if payload.get("type") == "new_message"
+        and payload.get("message", {}).get("message_type") == "research_findings"
     ]
-    assert completion_emits, "expected a 'complete' progress broadcast from run_research"
-    assert all(completion_emits), "every phase-completion broadcast must follow the phase commit"
+    assert findings_emits, "expected a 'research_findings' new_message broadcast from run_research"
+    assert all(findings_emits), (
+        "every research_findings broadcast must follow the proposal.research commit"
+    )

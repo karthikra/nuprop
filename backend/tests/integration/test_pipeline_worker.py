@@ -1,10 +1,16 @@
-"""Tests for the ARQ pipeline task functions."""
+"""Tests for the ARQ pipeline task functions.
+
+These exercise the worker-level ``_run_phase`` wrapper (job_status bookkeeping,
+chained-enqueue on success, terminal-failure handling) against the streaming
+``run_research`` path. We mock the planner + ``ai.client.messages.stream`` —
+the same shape ``test_research_transparency.py`` uses — rather than the
+defunct ``ResearchAgent.research_client`` agent method.
+"""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
-
-import pytest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 from app.infrastructure.db.repositories.agency_repo import AgencyRepository
 from app.infrastructure.db.repositories.client_repo import ClientRepository
@@ -28,16 +34,61 @@ def _ctx(job_try=1):
     return {"redis": AsyncMock(), "job_try": job_try}
 
 
-async def test_run_research_task_sets_job_status_and_enqueues_next(db, monkeypatch):
-    from app.services.ai.research_agent import ResearchAgent
+def _delta(text):
+    return SimpleNamespace(
+        type="content_block_delta",
+        delta=SimpleNamespace(type="text_delta", text=text),
+    )
 
+
+def _stop(content_block):
+    return SimpleNamespace(type="content_block_stop", content_block=content_block)
+
+
+class _MockStreamContext:
+    """Stands in for the async context manager returned by messages.stream(...)."""
+
+    def __init__(self, events):
+        self._events = events
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return None
+
+    def __aiter__(self):
+        async def _gen():
+            for ev in self._events:
+                yield ev
+        return _gen()
+
+
+def _patch_research_pipeline(monkeypatch, *, stream_context):
+    """Patch the Haiku planner + ai service so run_research runs without hitting Bedrock."""
+    monkeypatch.setattr(
+        "app.services.pipeline_service.generate_research_plan",
+        AsyncMock(return_value={"queries": [], "rationale": ""}),
+    )
+    mock_ai = MagicMock()
+    mock_ai.client.messages.stream = MagicMock(return_value=stream_context)
+    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-opus-4-7")
+    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+
+
+async def test_run_research_task_sets_job_status_and_enqueues_next(db, monkeypatch):
     proposal = await _make_proposal(db)
     pid = str(proposal.id)
 
-    async def fake_research(self, *a, **k):
-        return "## Research"
+    body_text = "Acme research summary."
+    _patch_research_pipeline(
+        monkeypatch,
+        stream_context=_MockStreamContext([
+            _delta(body_text),
+            _stop(SimpleNamespace(type="text", text=body_text, citations=[])),
+        ]),
+    )
 
-    monkeypatch.setattr(ResearchAgent, "research_client", fake_research)
     ctx = _ctx()
     await worker.run_research(ctx, pid)
 
@@ -57,15 +108,18 @@ async def test_task_marks_failed_and_emits_pipeline_error_on_exception(db, monke
     records every failure as terminal so the user can re-attempt via
     POST /chat/{id}/retry.
     """
-    from app.services.ai.research_agent import ResearchAgent
-
     proposal = await _make_proposal(db)
     pid = str(proposal.id)
 
-    async def boom(self, *a, **k):
-        raise RuntimeError("LLM down")
+    class _BrokenStream(_MockStreamContext):
+        def __aiter__(self):
+            async def _gen():
+                raise RuntimeError("LLM down")
+                yield  # pragma: no cover
+            return _gen()
 
-    monkeypatch.setattr(ResearchAgent, "research_client", boom)
+    _patch_research_pipeline(monkeypatch, stream_context=_BrokenStream([]))
+
     ctx = _ctx()
     await worker.run_research(ctx, pid)  # must NOT raise
 
