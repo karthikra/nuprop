@@ -1,38 +1,64 @@
-"""Tracks the known structural 'proposal field persistence' bug.
+"""Regression test for the proposal-field persistence bug.
 
-This is the larger issue behind the milestone note "some fields don't persist
-due to session commit ordering". It is NOT a logic error in a single function —
-it is structural:
-
-  * ``get_db()`` opens one ``AsyncSession`` per HTTP request and commits exactly
-    once, after the route handler returns.
-  * ``approve_gate()`` runs the entire downstream pipeline (research ->
-    benchmarks -> cost model -> narrative) inside that single request, each step
-    calling Claude and emitting mid-pipeline WebSocket broadcasts.
-  * None of the ``proposal_repo.update(...)`` writes are committed yet, so a
-    client that reacts to a "phase done" WS event by issuing a fresh REST
-    request reads the pre-pipeline row — a read-your-writes violation across
-    sessions (on SQLite a second connection cannot see another connection's
-    uncommitted writes at all).
-
-The fix is to run each pipeline phase as its own background job with its own
-session that commits when the phase finishes — a structural change (building out
-the currently-empty ``app/workers/`` package) that is intentionally out of scope
-for the test-suite work. This test is kept skipped so the issue stays tracked.
+Previously the whole pipeline ran in one request transaction committed only at
+request end, so a phase's writes were not visible to a concurrent reader until
+the entire request finished. Now each phase commits in its own session before it
+broadcasts — proven here by reading the written field from a *separate* session.
 """
 
 from __future__ import annotations
 
-import pytest
+from unittest.mock import AsyncMock
+
+from app.infrastructure.db.database import async_session_factory
+from app.infrastructure.db.repositories.agency_repo import AgencyRepository
+from app.infrastructure.db.repositories.client_repo import ClientRepository
+from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+from app.services.pipeline_service import PipelineService
 
 
-@pytest.mark.skip(
-    reason="Known structural bug — needs the background-worker pipeline refactor; "
-    "see this module's docstring"
-)
-async def test_pipeline_phases_commit_before_broadcasting_phase_done():
-    """When implemented: each pipeline phase must commit its proposal-field
-    writes *before* the corresponding 'phase done' WebSocket broadcast fires, so
-    a concurrent REST read observes the freshly written research / benchmarks /
-    cost_model / narrative fields instead of stale pre-pipeline values."""
-    raise AssertionError("not implemented — background-worker pipeline does not exist yet")
+async def test_phase_commits_before_it_would_broadcast(db, monkeypatch):
+    from app.services.ai.research_agent import ResearchAgent
+
+    agency = await AgencyRepository(db).create(name="P Agency", slug="p-agency")
+    client = await ClientRepository(db).create(agency_id=agency.id, name="C", slug="c")
+    proposal = await ProposalRepository(db).create(
+        agency_id=agency.id, client_id=client.id, project_name="P",
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
+    )
+    await db.commit()
+    pid = proposal.id
+
+    research_text = "## Research\nCommitted before broadcast."
+
+    async def fake_research(self, *a, **k):
+        return research_text
+
+    monkeypatch.setattr(ResearchAgent, "research_client", fake_research)
+
+    # Record every emit with whether the committed write was visible at that point.
+    # The invariant is: any "complete" / state-change broadcast must follow the
+    # phase commit (the bug was that they did not). A "searching" progress event
+    # legitimately fires *before* the write — it's a "starting work" signal.
+    observations: list[tuple[dict, bool]] = []
+
+    async def _emit_spy(redis, proposal_id, payload):  # noqa: ANN001
+        async with async_session_factory() as observer:
+            row = await ProposalRepository(observer).get_by_id(proposal_id)
+            committed = row is not None and row.research == research_text
+            observations.append((payload, committed))
+
+    monkeypatch.setattr("app.services.pipeline_service.publish", _emit_spy, raising=False)
+
+    svc = PipelineService(db, AsyncMock())
+    await svc.run_research(pid)
+
+    assert observations, "run_research should emit at least one WS event"
+    # The phase-completion broadcast must see the committed write.
+    completion_emits = [
+        committed for payload, committed in observations
+        if payload.get("status") == "complete"
+    ]
+    assert completion_emits, "expected a 'complete' progress broadcast from run_research"
+    assert all(completion_emits), "every phase-completion broadcast must follow the phase commit"
