@@ -337,6 +337,150 @@ class PipelineService:
         await self.session.commit()
         await self._emit_message(proposal_id, msg)
 
+    async def generate_outputs(self, proposal_id: UUID | str) -> None:
+        """Generate DOCX, print-ready HTML, email drafts, and interactive site.
+
+        Extraction of ChatViewModel._generate_outputs. The narrative extra_data
+        fallback branch from the source is dropped here — with per-phase commits,
+        proposal.covering_letter is always populated by the time this runs. (The
+        whole point of the fix.)
+        """
+        from app.infrastructure.db.models.agency import Agency
+        from app.services.document_generator import DocumentGenerator
+        from app.services.site_generator import SiteGenerator
+
+        proposal = await self.proposal_repo.get_by_id(proposal_id)
+        if proposal is None:
+            return
+
+        result = await self.session.execute(
+            select(Agency).where(Agency.id == str(proposal.agency_id))
+        )
+        agency = result.scalar_one_or_none()
+
+        prop_data = {
+            "project_name": proposal.project_name,
+            "brief": proposal.brief,
+            "cost_model": proposal.cost_model or {},
+            "covering_letter": proposal.covering_letter,
+            "covering_letter_alt": proposal.covering_letter_alt,
+            "executive_summary": proposal.executive_summary,
+            "scope_sections": proposal.scope_sections or [],
+            "cost_rationale": proposal.cost_rationale,
+            "terms": proposal.terms,
+        }
+
+        await self._emit_progress(proposal_id, "documents", "searching", "Generating DOCX...")
+        outputs = DocumentGenerator().generate_all(
+            proposal=prop_data,
+            agency_name=agency.name if agency else "Agency",
+            agency_colours=agency.colours if agency else None,
+        )
+
+        output_dir = Path(get_settings().OUTPUT_DIR) / str(proposal_id)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        files_generated: list[dict] = []
+
+        if outputs.docx_bytes:
+            docx_path = output_dir / "proposal.docx"
+            docx_path.write_bytes(outputs.docx_bytes)
+            await self.proposal_repo.update(proposal.id, docx_path=str(docx_path))
+            files_generated.append({"type": "docx", "filename": "proposal.docx", "size": len(outputs.docx_bytes)})
+
+        if outputs.pdf_bytes:
+            pdf_path = output_dir / "proposal.pdf"
+            pdf_path.write_bytes(outputs.pdf_bytes)
+            await self.proposal_repo.update(proposal.id, pdf_path=str(pdf_path))
+            files_generated.append({"type": "pdf", "filename": "proposal.pdf", "size": len(outputs.pdf_bytes)})
+
+        if outputs.pdf_html:
+            html_path = output_dir / "proposal-print.html"
+            html_path.write_text(outputs.pdf_html, encoding="utf-8")
+            files_generated.append({"type": "html", "filename": "proposal-print.html", "size": len(outputs.pdf_html)})
+
+        if outputs.email_confident:
+            email_path = output_dir / "email-drafts.md"
+            email_content = (
+                f"# Email Draft — Confident\n\n{outputs.email_confident}\n\n---\n\n"
+                f"# Email Draft — Warm\n\n{outputs.email_warm}"
+            )
+            email_path.write_text(email_content, encoding="utf-8")
+            files_generated.append({"type": "email", "filename": "email-drafts.md"})
+
+        await self._emit_progress(proposal_id, "documents", "complete", "Documents ready")
+
+        # Interactive proposal site — best-effort
+        await self._emit_progress(proposal_id, "site", "searching", "Generating interactive proposal site...")
+        try:
+            site_theme = "editorial"
+            template_config = await self._load_template_config(proposal)
+            if template_config:
+                site_theme = template_config.get("output", {}).get("site_theme", "editorial")
+
+            agency_dict = {
+                "name": agency.name if agency else "Agency",
+                "logo_url": agency.logo_url if agency else None,
+                "colours": agency.colours if agency else {},
+                "fonts": agency.fonts if agency else {},
+                "email": "",
+            }
+            site_html = SiteGenerator().generate(
+                proposal_data=prop_data,
+                agency=agency_dict,
+                theme=site_theme,
+                proposal_id=str(proposal_id),
+                tracking_endpoint="/api/v1/track",
+            )
+            site_dir = output_dir / "site"
+            site_dir.mkdir(parents=True, exist_ok=True)
+            (site_dir / "index.html").write_text(site_html, encoding="utf-8")
+
+            site_url = f"/p/{proposal_id}"
+            await self.proposal_repo.update(proposal.id, site_url=site_url)
+            files_generated.append({
+                "type": "site", "filename": "site/index.html",
+                "url": site_url, "theme": site_theme,
+            })
+            await self._emit_progress(
+                proposal_id, "site", "complete", f"Proposal site ready ({site_theme} theme)"
+            )
+        except Exception as e:  # noqa: BLE001 — site is best-effort
+            logger.exception("site generation failed")
+            await self._emit_progress(
+                proposal_id, "site", "error", f"Site generation failed: {str(e)[:100]}"
+            )
+
+        # Advance pipeline to complete
+        pipeline = proposal.pipeline_state.copy()
+        pipeline["phases_completed"] = pipeline.get("phases_completed", []) + ["output_generation"]
+        pipeline["current_phase"] = "complete"
+        await self.proposal_repo.update(proposal.id, pipeline_state=pipeline, status="review")
+        await self.session.commit()                       # commit BEFORE broadcast
+
+        await self._emit_phase_change(proposal_id, "complete")
+
+        file_list = "\n".join(f"- **{f['type'].upper()}**: {f['filename']}" for f in files_generated)
+        content = (
+            f"**All outputs generated.**\n\n"
+            f"{file_list}\n\n"
+            f"Download your files below. The proposal is ready to send."
+        )
+        msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.ASSISTANT.value,
+            message_type=MessageType.OUTPUT_READY.value,
+            content=content,
+            extra_data={
+                "files": files_generated,
+                "email_confident": outputs.email_confident,
+                "email_warm": outputs.email_warm,
+            },
+            phase="complete",
+        )
+        await self.session.commit()
+        await self._emit_message(proposal_id, msg)
+
     @staticmethod
     def _merge_preferences_into_config(template_config: dict | None, preferences: dict) -> dict:
         """Overlay user preferences onto template config for AI services."""

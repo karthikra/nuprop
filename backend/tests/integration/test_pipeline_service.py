@@ -166,3 +166,43 @@ async def test_generate_narrative_commits_sections_and_advances_pipeline(db, mon
         assert refetched.covering_letter == "Dear Acme,"
         assert refetched.executive_summary == "Summary."
         assert refetched.pipeline_state["current_phase"] == "narrative_review"
+
+
+async def test_generate_outputs_commits_status_and_advances_to_complete(db, tmp_path, monkeypatch):
+    # OUTPUT_DIR is a @computed_field — patch get_settings() in the pipeline module
+    # to return a stub whose OUTPUT_DIR points at tmp_path so generated files land there.
+    from app.core.config import get_settings as real_get_settings
+
+    real_settings = real_get_settings()
+
+    class _StubSettings:
+        OUTPUT_DIR = str(tmp_path)
+
+        def __getattr__(self, name):  # delegate everything else to the real settings
+            return getattr(real_settings, name)
+
+    monkeypatch.setattr(
+        "app.services.pipeline_service.get_settings", lambda: _StubSettings()
+    )
+
+    agency, _, proposal = await _make_proposal(
+        db,
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "output_generation", "phases_completed": ["research", "narrative_review"]},
+    )
+    # give the proposal narrative content so generation has something to render
+    await ProposalRepository(db).update(
+        proposal.id, covering_letter="Dear Acme,", executive_summary="Summary.",
+        scope_sections=[], terms="Net 30.",
+    )
+    await db.commit()
+    pid = proposal.id
+
+    svc = PipelineService(db, AsyncMock())
+    await svc.generate_outputs(pid)
+
+    from app.infrastructure.db.database import async_session_factory
+    async with async_session_factory() as fresh:
+        refetched = await ProposalRepository(fresh).get_by_id(pid)
+        assert refetched.pipeline_state["current_phase"] == "complete"
+        assert refetched.status == "review"
