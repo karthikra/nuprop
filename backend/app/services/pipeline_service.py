@@ -179,12 +179,28 @@ class PipelineService:
         if context_brief:
             user_msg += f"\n\n## Existing context\n{context_brief}"
 
+        # Build the system-prompt substitutions (the same pattern ResearchAgent.research_client used).
+        _context_section_text = ""
+        if context_brief:
+            _context_section_text = (
+                f"## Existing Context (from past interactions)\n"
+                f"The agency already knows this about the client:\n{context_brief}\n\n"
+                f"Focus your research on what's NEW or what fills gaps in the existing context. "
+                f"Don't repeat what's already known."
+            )
+        system_prompt = RESEARCH_SYSTEM.format(
+            client_name=client_name,
+            max_searches=10,
+            context_section=_context_section_text,
+            template_section="",  # template-queries path not wired in this orchestration; v2.
+        )
+
         ai = get_ai_service()
         try:
             async with ai.client.messages.stream(
                 model=ai.model_for(Tier.HEAVY),     # Opus 4.7
                 max_tokens=4096,
-                system=RESEARCH_SYSTEM,
+                system=system_prompt,
                 tools=[{
                     "type": "web_search_20250305",
                     "name": "web_search",
@@ -196,7 +212,10 @@ class PipelineService:
             await flusher.flush(final_status="complete")
         except Exception as exc:  # noqa: BLE001
             logger.exception("run_research streaming failed for %s", proposal_id)
-            await flusher.flush(final_status="failed", error=str(exc))
+            try:
+                await flusher.flush(final_status="failed", error=str(exc))
+            except Exception:  # noqa: BLE001
+                logger.exception("flusher.flush failed during exception handling")
             raise
 
         # 4. Findings — annotated.

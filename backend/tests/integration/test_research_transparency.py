@@ -81,6 +81,8 @@ async def test_run_research_emits_plan_activity_log_and_findings(db, monkeypatch
     fake_events = [
         _start(SimpleNamespace(type="tool_use", name="web_search",
                                 input={"query": "Acme rebrand 2024"})),
+        _stop(SimpleNamespace(type="tool_use", name="web_search",
+                               input={"query": "Acme rebrand 2024"})),
         _stop(SimpleNamespace(type="web_search_tool_result", content=[
             SimpleNamespace(url="https://example.com/a", title="Acme rebrand article"),
         ])),
@@ -189,3 +191,30 @@ async def test_run_research_failure_marks_activity_log_failed_and_does_not_creat
     async with async_session_factory() as fresh:
         refetched = await ProposalRepository(fresh).get_by_id(proposal.id)
     assert refetched.research is None
+
+
+async def test_run_research_formats_system_prompt_with_no_remaining_placeholders(db, monkeypatch):
+    """Regression: RESEARCH_SYSTEM is a str.format template with {client_name},
+    {max_searches}, {context_section}, {template_section} placeholders. The
+    worker must substitute them before sending to Bedrock — otherwise the model
+    receives literal curly-brace text in its system prompt."""
+    proposal = await _make_proposal(db)
+    monkeypatch.setattr(
+        "app.services.pipeline_service.generate_research_plan",
+        AsyncMock(return_value={"queries": [], "rationale": ""}),
+    )
+    mock_ai = MagicMock()
+    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext([]))
+    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-opus-4-7")
+    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+
+    svc = PipelineService(db, AsyncMock())
+    await svc.run_research(proposal.id)
+
+    kwargs = mock_ai.client.messages.stream.call_args.kwargs
+    system_arg = kwargs["system"]
+    # Verify no leftover format placeholders. We check the specific placeholders
+    # from RESEARCH_SYSTEM rather than just "{" — a system prompt may legitimately
+    # contain a JSON example with braces.
+    for placeholder in ("{client_name}", "{max_searches}", "{context_section}", "{template_section}"):
+        assert placeholder not in system_arg, f"unformatted placeholder in system prompt: {placeholder}"
