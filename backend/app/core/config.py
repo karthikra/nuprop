@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # Redis (Upstash in prod)
     REDIS_ENABLED: bool = False
     REDIS_URL: str = "redis://localhost:6379/0"
+    ARQ_MAX_TRIES: int = 3
 
     # Anthropic
     ANTHROPIC_API_KEY: str = ""
