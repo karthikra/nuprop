@@ -56,14 +56,14 @@ describe('MessageBubble', () => {
     expect(screen.getByText(/Cost Model — Review & Approve/i)).toBeInTheDocument()
   })
 
-  it('routes a research_findings message to the research card', () => {
+  it('routes a research_findings message to the research findings card', () => {
     render(
       <MessageBubble
         message={base({ message_type: 'research_findings', content: 'we found things' })}
         proposalId="prop-1"
       />,
     )
-    expect(screen.getByText(/Research & Benchmarks Complete/i)).toBeInTheDocument()
+    expect(screen.getByText(/Research findings/i)).toBeInTheDocument()
     expect(screen.getByText('we found things')).toBeInTheDocument()
   })
 })

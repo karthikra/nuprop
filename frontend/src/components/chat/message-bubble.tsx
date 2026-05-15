@@ -3,6 +3,9 @@ import { ApprovalGate } from './approval-gate'
 import { CostModelCard } from './cost-model-card'
 import { NarrativePreview } from './narrative-preview'
 import { OutputReadyCard } from './output-ready-card'
+import { ResearchPlanCard } from './research-plan-card'
+import { ResearchActivityLog } from './research-activity-log'
+import { ResearchFindingsCard } from './research-findings-card'
 
 interface Props {
   message: ChatMessage
@@ -42,9 +45,28 @@ export function MessageBubble({ message, proposalId }: Props) {
     )
   }
 
-  // Research findings — collapsible card
-  if (message.message_type === 'research_findings') {
-    return <ResearchCard content={message.content} />
+  // Research / benchmarks plan cards
+  if (
+    message.message_type === 'research_plan' ||
+    message.message_type === 'benchmarks_plan'
+  ) {
+    return <ResearchPlanCard message={message} />
+  }
+
+  // Research / benchmarks activity logs
+  if (
+    message.message_type === 'research_activity_log' ||
+    message.message_type === 'benchmarks_activity_log'
+  ) {
+    return <ResearchActivityLog message={message} />
+  }
+
+  // Research / benchmarks findings cards
+  if (
+    message.message_type === 'research_findings' ||
+    message.message_type === 'benchmarks_findings'
+  ) {
+    return <ResearchFindingsCard message={message} />
   }
 
   // Cost model — interactive table
@@ -75,26 +97,6 @@ export function MessageBubble({ message, proposalId }: Props) {
         <p className={`mt-1 text-[10px] ${isUser ? 'text-stone-400' : 'text-stone-400'}`}>
           {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </p>
-      </div>
-    </div>
-  )
-}
-
-function ResearchCard({ content }: { content: string }) {
-  return (
-    <div className="flex justify-start">
-      <div className="max-w-[90%] rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center">
-            <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          </div>
-          <span className="text-sm font-semibold text-blue-900">Research & Benchmarks Complete</span>
-        </div>
-        <div className="text-sm text-blue-800 leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto prose prose-sm prose-blue">
-          {content}
-        </div>
       </div>
     </div>
   )
