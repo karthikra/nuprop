@@ -25,7 +25,10 @@ from app.services.ai.benchmark_agent import BenchmarkAgent
 from app.services.ai.brief_analyzer import BriefAnalyzer
 from app.services.ai.cost_model_builder import CostModelBuilder
 from app.services.ai.narrative_generator import NarrativeGenerator
-from app.services.ai.research_agent import ResearchAgent
+from app.services.ai.research_agent import RESEARCH_SYSTEM, ResearchAgent
+from app.services.llm import Tier, get_ai_service
+from app.services.research_planner import generate_benchmarks_plan, generate_research_plan
+from app.services.research_streaming import ActivityFlusher, process_stream
 
 logger = logging.getLogger(__name__)
 
@@ -128,22 +131,86 @@ class PipelineService:
         proposal = await self.proposal_repo.get_by_id(proposal_id)
         if proposal is None:
             return
-        brief = proposal.brief
-        client_name = brief.get("client", {}).get("name", "the client")
-        industry = brief.get("client", {}).get("industry")
-        template_config = await self._load_template_config(proposal)
-        context_brief = await self._load_context_brief(proposal)
-        research_queries = (
-            (template_config or {}).get("research", {}).get("client_queries")
+
+        # 1. Pre-flight plan (Haiku) — short structured JSON, ~1s.
+        plan = await generate_research_plan(brief=proposal.brief or {})
+        plan_msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.ASSISTANT.value,
+            message_type="research_plan",
+            content="",
+            extra_data={"phase": "research", **plan},
+            phase="research",
+        )
+        await self.session.commit()
+        await self._emit_message(proposal_id, plan_msg)
+
+        # 2. Activity log (starts empty, status="running").
+        log_msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.ASSISTANT.value,
+            message_type="research_activity_log",
+            content="",
+            extra_data={"phase": "research", "status": "running", "events": []},
+            phase="research",
+        )
+        await self.session.commit()
+        await self._emit_message(proposal_id, log_msg)
+
+        # 3. Streaming Opus 4.7 call with web_search.
+        flusher = ActivityFlusher(
+            session=self.session,
+            msg_repo=self.msg_repo,
+            redis=self.redis,
+            log_msg_id=log_msg.id,
+            proposal_id=proposal_id,
+            phase="research",
         )
 
-        await self._emit_progress(proposal_id, "research", "searching", f"Researching {client_name}...")
-        research_md = await ResearchAgent().research_client(
-            client_name, industry, research_queries, context_brief=context_brief
+        client_name = (proposal.brief or {}).get("client", {}).get("name", "the client")
+        industry = (proposal.brief or {}).get("client", {}).get("industry")
+        context_brief = await self._load_context_brief(proposal)
+        user_msg = (
+            f"Research {client_name}"
+            + (f" (industry: {industry})" if industry else "")
+            + ". Be thorough — this research directly feeds into a high-value proposal."
+            + " Search the web comprehensively."
         )
-        await self.proposal_repo.update(proposal.id, research=research_md)
-        await self.session.commit()                       # commit BEFORE broadcast
-        await self._emit_progress(proposal_id, "research", "complete", "Client research done")
+        if context_brief:
+            user_msg += f"\n\n## Existing context\n{context_brief}"
+
+        ai = get_ai_service()
+        try:
+            async with ai.client.messages.stream(
+                model=ai.model_for(Tier.HEAVY),     # Opus 4.7
+                max_tokens=4096,
+                system=RESEARCH_SYSTEM,
+                tools=[{
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 10,
+                }],
+                messages=[{"role": "user", "content": user_msg}],
+            ) as stream:
+                body, citations, spans = await process_stream(stream, on_event=flusher.append)
+            await flusher.flush(final_status="complete")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("run_research streaming failed for %s", proposal_id)
+            await flusher.flush(final_status="failed", error=str(exc))
+            raise
+
+        # 4. Findings — annotated.
+        findings_msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.ASSISTANT.value,
+            message_type="research_findings",
+            content=body,
+            extra_data={"phase": "research", "citations": citations, "spans": spans},
+            phase="research",
+        )
+        await self.proposal_repo.update(proposal.id, research=body)
+        await self.session.commit()
+        await self._emit_message(proposal_id, findings_msg)
 
     async def run_benchmarks(self, proposal_id: UUID | str) -> None:
         proposal = await self.proposal_repo.get_by_id(proposal_id)
