@@ -1,5 +1,11 @@
 """Integration tests for the chat API — messages, send, approval gates,
-and the cost-model line-item patch."""
+and the cost-model line-item patch.
+
+After the background-worker refactor, brief-phase send_message and the
+non-brief approval gates enqueue ARQ jobs instead of running the pipeline
+inline. Tests that exercise those paths require the ``arq_pool`` fixture and
+assert the enqueue rather than inline pipeline output.
+"""
 
 from __future__ import annotations
 
@@ -32,39 +38,10 @@ async def test_get_messages_cross_agency_404(client, registered, second_agency):
     assert resp.status_code == 404
 
 
-async def test_send_message_echo_path_when_ai_not_configured(client, registered):
-    """With no API key the brief phase falls back to an echo response."""
-    p = await _make_proposal(client, registered.headers)
-    resp = await client.post(
-        f"{API}/chat/{p['id']}/send",
-        headers=registered.headers,
-        json={"content": "We need a rebrand for Acme"},
-    )
-    assert resp.status_code == 201
-    msgs = resp.json()
-    assert len(msgs) == 2
-    assert msgs[0]["role"] == "user"
-    assert msgs[0]["content"] == "We need a rebrand for Acme"
-    assert msgs[1]["role"] == "assistant"
-
-
-async def test_send_message_ai_path_completes_brief(client, registered, monkeypatch):
-    """With AI 'configured' and BriefAnalyzer mocked, a completed brief is
-    persisted on the proposal and surfaced as a brief_summary message."""
-    from app.infrastructure.external.anthropic_client import AnthropicClient
-    from app.services.ai.brief_analyzer import BriefAnalysisResult, BriefAnalyzer
-
-    monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: True))
-
-    async def fake_analyze(self, chat_history, current_brief):
-        return BriefAnalysisResult(
-            response_text="Here's the brief — confirm?",
-            brief_complete=True,
-            brief_data={"client": {"name": "Acme"}, "project": {"type": "rebrand"}},
-        )
-
-    monkeypatch.setattr(BriefAnalyzer, "analyze", fake_analyze)
-
+async def test_send_message_brief_phase_enqueues_analyze_brief(client, registered, arq_pool):
+    """In the brief phase, send_message persists the user message and enqueues
+    the analyze_brief job — it does not run the analyzer inline. The assistant
+    reply arrives later via the WebSocket channel (out of scope for this test)."""
     p = await _make_proposal(client, registered.headers)
     resp = await client.post(
         f"{API}/chat/{p['id']}/send",
@@ -72,16 +49,23 @@ async def test_send_message_ai_path_completes_brief(client, registered, monkeypa
         json={"content": "Acme needs a rebrand"},
     )
     assert resp.status_code == 201
-    assistant = resp.json()[1]
-    assert assistant["message_type"] == "brief_summary"
-    assert assistant["extra_data"]["requires_approval"] is True
+    msgs = resp.json()
+    assert len(msgs) == 1
+    assert msgs[0]["role"] == "user"
+    assert msgs[0]["content"] == "Acme needs a rebrand"
 
-    # the completed brief is persisted on the proposal
+    arq_pool.enqueue_job.assert_awaited()
+    assert arq_pool.enqueue_job.await_args.args[0] == "analyze_brief"
+
+    # The proposal's job_status reflects the queued phase
     prop = await client.get(f"{API}/proposals/{p['id']}", headers=registered.headers)
-    assert prop.json()["brief"]["client"]["name"] == "Acme"
+    job_status = prop.json()["pipeline_state"]["job_status"]
+    assert job_status == {"phase": "analyze_brief", "state": "queued", "error": None}
 
 
 async def test_approve_brief_gate_advances_pipeline(client, registered, seeded_templates):
+    """The brief gate stays synchronous — template matching is a local lookup,
+    no LLM/IO involved — so this test exercises the full handler."""
     p = await _make_proposal(client, registered.headers)
     resp = await client.post(
         f"{API}/chat/{p['id']}/approve/brief", headers=registered.headers, json={"data": {}}
@@ -92,6 +76,26 @@ async def test_approve_brief_gate_advances_pipeline(client, registered, seeded_t
     pipeline = prop.json()["pipeline_state"]
     assert pipeline["current_phase"] == "template_confirm"
     assert "brief" in pipeline["phases_completed"]
+
+
+async def test_approve_template_gate_enqueues_research(client, registered, arq_pool, seeded_templates):
+    p = await _make_proposal(client, registered.headers)
+    # advance the proposal to template_confirm via the brief gate
+    await client.post(f"{API}/chat/{p['id']}/approve/brief", headers=registered.headers, json={"data": {}})
+
+    resp = await client.post(
+        f"{API}/chat/{p['id']}/approve/template",
+        headers=registered.headers,
+        json={"data": {"template_key": "brand_identity"}},
+    )
+    assert resp.status_code == 200
+    arq_pool.enqueue_job.assert_awaited()
+    assert arq_pool.enqueue_job.await_args.args[0] == "run_research"
+
+    prop = await client.get(f"{API}/proposals/{p['id']}", headers=registered.headers)
+    pipeline = prop.json()["pipeline_state"]
+    assert pipeline["current_phase"] == "research"
+    assert pipeline["job_status"]["state"] == "queued"
 
 
 async def test_approve_unknown_gate_400(client, registered):
