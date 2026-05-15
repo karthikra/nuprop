@@ -64,3 +64,20 @@ async def ws_event_subscriber() -> None:
             logger.exception("ws subscriber error; reconnecting in 2s")
             await client.aclose()
             await asyncio.sleep(2)
+
+
+from app.domain.schemas.chat_schemas import ChatMessageResponse
+
+
+async def publish_message_updated(redis, proposal_id, msg) -> None:
+    """Publish a `message_updated` WS event for a chat message that already
+    exists on the client.
+
+    Used by the activity-log flusher: each flush updates the same message in
+    the DB and re-publishes its full current state so the frontend can
+    `updateMessage(msg)` (replace-by-id) instead of growing its message list.
+    """
+    await publish(redis, str(proposal_id), {
+        "type": "message_updated",
+        "message": ChatMessageResponse.model_validate(msg).model_dump(mode="json"),
+    })

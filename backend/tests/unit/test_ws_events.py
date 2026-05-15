@@ -38,3 +38,30 @@ async def test_handle_event_ignores_malformed_payloads(monkeypatch):
     monkeypatch.setattr(events.ws_manager, "broadcast", broadcast)
     await events._handle_event("not-json{")  # must not raise
     broadcast.assert_not_awaited()
+
+
+from app.domain.schemas.chat_schemas import ChatMessageResponse
+
+
+async def test_publish_message_updated_wraps_msg_in_message_updated_envelope():
+    from types import SimpleNamespace
+    from uuid import UUID
+    redis = AsyncMock()
+    msg_id = UUID("11111111-1111-1111-1111-111111111111")
+    proposal_id = UUID("22222222-2222-2222-2222-222222222222")
+    msg = SimpleNamespace(
+        id=msg_id, proposal_id=proposal_id, role="assistant",
+        message_type="research_activity_log",
+        content="", extra_data={"phase": "research", "status": "running", "events": []},
+        phase="research", channel="main",
+        created_at=__import__("datetime").datetime(2026, 5, 15, 14, 32, 0, tzinfo=__import__("datetime").timezone.utc),
+    )
+    await events.publish_message_updated(redis, proposal_id, msg)
+    redis.publish.assert_awaited_once()
+    channel, raw = redis.publish.await_args.args
+    assert channel == events.WS_CHANNEL
+    envelope = __import__("json").loads(raw)
+    assert envelope["proposal_id"] == str(proposal_id)
+    assert envelope["payload"]["type"] == "message_updated"
+    assert envelope["payload"]["message"]["id"] == str(msg_id)
+    assert envelope["payload"]["message"]["message_type"] == "research_activity_log"
