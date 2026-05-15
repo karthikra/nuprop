@@ -59,6 +59,35 @@ class PipelineService:
     async def _emit_phase_change(self, proposal_id, phase: str) -> None:
         await self._emit(proposal_id, {"type": "phase_change", "phase": phase})
 
+    async def _load_template_config(self, proposal) -> dict | None:
+        if not proposal.template_id:
+            return None
+        from app.infrastructure.db.models.template import StrategyTemplate
+        result = await self.session.execute(
+            select(StrategyTemplate).where(StrategyTemplate.template_key == proposal.template_id)
+        )
+        tmpl = result.scalar_one_or_none()
+        if tmpl and isinstance(tmpl.config, dict):
+            return tmpl.config
+        return None
+
+    async def _load_context_brief(self, proposal) -> str | None:
+        try:
+            from app.infrastructure.db.models.client import Client
+            from app.services.context_service import ContextService
+            result = await self.session.execute(
+                select(Client).where(Client.id == str(proposal.client_id))
+            )
+            client_row = result.scalar_one_or_none()
+            if client_row and client_row.context_profile:
+                client_name = proposal.brief.get("client", {}).get("name", "the client")
+                return await ContextService().generate_context_brief(
+                    client_name, client_row.context_profile
+                )
+        except Exception:  # noqa: BLE001 — context is best-effort
+            logger.exception("context brief load failed")
+        return None
+
     async def analyze_brief(self, proposal_id: UUID | str) -> None:
         """Brief-intake phase. Extracted from ChatViewModel._handle_brief_phase."""
         proposal = await self.proposal_repo.get_by_id(proposal_id)
@@ -94,6 +123,67 @@ class PipelineService:
         await self.session.commit()          # commit BEFORE broadcasting
         await self._emit_message(proposal_id, assistant_msg)
         await self._emit(proposal_id, {"type": "typing", "typing": False})
+
+    async def run_research(self, proposal_id: UUID | str) -> None:
+        proposal = await self.proposal_repo.get_by_id(proposal_id)
+        if proposal is None:
+            return
+        brief = proposal.brief
+        client_name = brief.get("client", {}).get("name", "the client")
+        industry = brief.get("client", {}).get("industry")
+        template_config = await self._load_template_config(proposal)
+        context_brief = await self._load_context_brief(proposal)
+        research_queries = (
+            (template_config or {}).get("research", {}).get("client_queries")
+        )
+
+        await self._emit_progress(proposal_id, "research", "searching", f"Researching {client_name}...")
+        research_md = await ResearchAgent().research_client(
+            client_name, industry, research_queries, context_brief=context_brief
+        )
+        await self.proposal_repo.update(proposal.id, research=research_md)
+        await self.session.commit()                       # commit BEFORE broadcast
+        await self._emit_progress(proposal_id, "research", "complete", "Client research done")
+
+    async def run_benchmarks(self, proposal_id: UUID | str) -> None:
+        proposal = await self.proposal_repo.get_by_id(proposal_id)
+        if proposal is None:
+            return
+        brief = proposal.brief
+        deliverables = brief.get("project", {}).get("deliverables", [])
+        template_config = await self._load_template_config(proposal)
+        benchmark_queries = (
+            (template_config or {}).get("research", {}).get("benchmark_queries")
+        )
+
+        await self._emit_progress(proposal_id, "benchmarks", "searching", "Finding pricing benchmarks...")
+        benchmarks_md = await BenchmarkAgent().find_benchmarks(deliverables, "India", benchmark_queries)
+        await self.proposal_repo.update(proposal.id, benchmarks=benchmarks_md)
+        await self.session.commit()                       # commit BEFORE broadcast
+        await self._emit_progress(proposal_id, "benchmarks", "complete", "Pricing benchmarks done")
+
+        # combined research + benchmarks findings message
+        proposal = await self.proposal_repo.get_by_id(proposal_id)
+        summary = (
+            f"**Research and benchmarking complete.**\n\n---\n\n"
+            f"{proposal.research}\n\n---\n\n{benchmarks_md}"
+        )
+        msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.ASSISTANT.value,
+            message_type=MessageType.RESEARCH_FINDINGS.value,
+            content=summary,
+            extra_data={"has_research": True, "has_benchmarks": True},
+            phase="research",
+        )
+        # advance pipeline
+        pipeline = proposal.pipeline_state.copy()
+        pipeline["phases_completed"] = pipeline.get("phases_completed", []) + ["research"]
+        pipeline["current_phase"] = "cost_model_review"
+        await self.proposal_repo.update(proposal.id, pipeline_state=pipeline)
+        await self.session.commit()                       # commit BEFORE broadcast
+        await self._emit_message(proposal_id, msg)
+        await self._emit_phase_change(proposal_id, "cost_model_review")
 
     @staticmethod
     def _merge_preferences_into_config(template_config: dict | None, preferences: dict) -> dict:

@@ -62,3 +62,46 @@ async def test_analyze_brief_persists_completed_brief_before_emitting(db, monkey
         assert refetched.brief == {"client": {"name": "Acme"}}
 
     assert emitted, "expected a WebSocket event to be published"
+
+
+async def test_run_research_commits_research_before_emitting(db, monkeypatch):
+    from app.services.ai.research_agent import ResearchAgent
+
+    _, _, proposal = await _make_proposal(
+        db, brief={"client": {"name": "Acme", "industry": "tech"}, "project": {"deliverables": []}}
+    )
+    pid = proposal.id
+
+    async def fake_research(self, client_name, industry, queries=None, context_brief=None):
+        return "## Research\nAcme is a tech company."
+
+    monkeypatch.setattr(ResearchAgent, "research_client", fake_research)
+    svc = PipelineService(db, AsyncMock())
+    await svc.run_research(pid)
+
+    from app.infrastructure.db.database import async_session_factory
+    async with async_session_factory() as fresh:
+        refetched = await ProposalRepository(fresh).get_by_id(pid)
+        assert refetched.research == "## Research\nAcme is a tech company."
+
+
+async def test_run_benchmarks_advances_pipeline_to_cost_model_review(db, monkeypatch):
+    from app.services.ai.benchmark_agent import BenchmarkAgent
+
+    _, _, proposal = await _make_proposal(
+        db, brief={"client": {"name": "Acme"}, "project": {"deliverables": [{"category": "Logo"}]}}
+    )
+    pid = proposal.id
+
+    async def fake_benchmarks(self, deliverables, region="India", queries=None):
+        return "## Benchmarks\n₹X per logo."
+
+    monkeypatch.setattr(BenchmarkAgent, "find_benchmarks", fake_benchmarks)
+    svc = PipelineService(db, AsyncMock())
+    await svc.run_benchmarks(pid)
+
+    from app.infrastructure.db.database import async_session_factory
+    async with async_session_factory() as fresh:
+        refetched = await ProposalRepository(fresh).get_by_id(pid)
+        assert refetched.benchmarks == "## Benchmarks\n₹X per logo."
+        assert refetched.pipeline_state["current_phase"] == "cost_model_review"
