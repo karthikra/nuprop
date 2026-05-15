@@ -37,11 +37,29 @@ class ChatViewModel(ViewModelBase):
             self._proposal_repo = ProposalRepository(self._db)
         return self._proposal_repo
 
-    async def _enqueue(self, job_name: str, proposal_id) -> None:
-        """Push a pipeline-phase job onto the ARQ pool held on app.state."""
+    async def _enqueue(
+        self,
+        job_name: str,
+        proposal_id,
+        idempotency_key: str | None = None,
+    ) -> None:
+        """Push a pipeline-phase job onto the ARQ pool held on app.state.
+
+        ARQ uses ``_job_id`` as an idempotency key — once a result exists for an
+        ID, subsequent enqueues of the same ID are silently dropped for the
+        result-TTL window (24h by default). That's correct for one-shot gate
+        approvals (prevents double-runs from accidental double-clicks) but
+        breaks multi-turn flows like ``analyze_brief`` where every user message
+        must trigger a fresh run.
+
+        Callers that need a fresh run per invocation pass an
+        ``idempotency_key`` (e.g. the user message ID); it's appended to the
+        job_id so each turn gets its own slot in ARQ's result store.
+        """
         pool = self._request.app.state.arq_pool
+        suffix = f":{idempotency_key}" if idempotency_key else ""
         await pool.enqueue_job(
-            job_name, str(proposal_id), _job_id=f"{proposal_id}:{job_name}"
+            job_name, str(proposal_id), _job_id=f"{proposal_id}:{job_name}{suffix}"
         )
 
     async def _set_job_queued(self, proposal, phase: str) -> dict:
@@ -95,7 +113,11 @@ class ChatViewModel(ViewModelBase):
             await ws_manager.broadcast(str(proposal_id), {"type": "typing", "typing": True})
             pipeline = await self._set_job_queued(proposal, "analyze_brief")
             await self.proposal_repo.update(proposal.id, pipeline_state=pipeline)
-            await self._enqueue("analyze_brief", proposal_id)
+            # Per-turn idempotency: each user message must trigger a fresh
+            # analyze_brief run, so we key the job_id on the user_msg.id.
+            await self._enqueue(
+                "analyze_brief", proposal_id, idempotency_key=str(user_msg.id)
+            )
             self.status_code = 201
             return [user_msg]
 

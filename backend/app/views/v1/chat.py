@@ -81,6 +81,8 @@ async def retry_failed_phase(
     vm: ChatViewModel = Depends(get_vm),
 ):
     """Re-enqueue the phase recorded as failed in pipeline_state.job_status."""
+    from uuid import uuid4
+
     proposal = await vm.proposal_repo.get_by_id(proposal_id)
     if not proposal or str(proposal.agency_id) != str(agency_id):
         raise HTTPException(status_code=404, detail="Proposal not found")
@@ -91,7 +93,9 @@ async def retry_failed_phase(
     pipeline = proposal.pipeline_state.copy()
     pipeline["job_status"] = {"phase": phase, "state": "queued", "error": None}
     await vm.proposal_repo.update(proposal_id, pipeline_state=pipeline)
-    await vm._enqueue(phase, proposal_id)
+    # ARQ already has a stored result for the previous (failed) attempt's
+    # job_id. Append a unique key so this re-enqueue is treated as a fresh job.
+    await vm._enqueue(phase, proposal_id, idempotency_key=str(uuid4()))
     return {"phase": phase, "state": "queued"}
 
 
