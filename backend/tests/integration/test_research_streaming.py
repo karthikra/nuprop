@@ -112,3 +112,132 @@ async def test_flush_publishes_message_updated_event(db):
     envelope = _json.loads(raw)
     assert envelope["payload"]["type"] == "message_updated"
     assert envelope["payload"]["message"]["message_type"] == "research_activity_log"
+
+
+from types import SimpleNamespace
+
+from app.services.research_streaming import process_stream
+
+
+def _start(content_block):
+    return SimpleNamespace(type="content_block_start", content_block=content_block)
+
+
+def _delta(text):
+    return SimpleNamespace(
+        type="content_block_delta",
+        delta=SimpleNamespace(type="text_delta", text=text),
+    )
+
+
+def _stop(content_block):
+    return SimpleNamespace(type="content_block_stop", content_block=content_block)
+
+
+def _tool_use(query):
+    return SimpleNamespace(type="tool_use", name="web_search", input={"query": query})
+
+
+def _ws_result(*results):
+    return SimpleNamespace(type="web_search_tool_result", content=list(results))
+
+
+def _ws_result_item(url, title):
+    return SimpleNamespace(url=url, title=title)
+
+
+def _text_block(text, citations=None):
+    return SimpleNamespace(type="text", text=text, citations=citations or [])
+
+
+def _citation(url, title, cited_text, start, end):
+    return SimpleNamespace(
+        url=url, title=title, cited_text=cited_text,
+        start_block_index=start, end_block_index=end,
+    )
+
+
+class _AsyncIter:
+    def __init__(self, items):
+        self._items = items
+
+    def __aiter__(self):
+        async def _gen():
+            for item in self._items:
+                yield item
+        return _gen()
+
+
+async def test_process_stream_records_search_events():
+    events: list[dict] = []
+    stream = _AsyncIter([
+        _start(_tool_use("Pepsi Global revenue")),
+        _stop(_tool_use("Pepsi Global revenue")),
+    ])
+    body, citations, spans = await process_stream(stream, on_event=events.append)
+    search_events = [e for e in events if e["type"] == "search"]
+    assert search_events == [{"type": "search", "query": "Pepsi Global revenue", "ts": search_events[0]["ts"]}]
+
+
+async def test_process_stream_records_read_events_for_each_result_url():
+    events: list[dict] = []
+    stream = _AsyncIter([
+        _start(_ws_result(
+            _ws_result_item("https://reuters.com/a", "Pepsi Q4"),
+            _ws_result_item("https://ft.com/b", "Beverage growth"),
+        )),
+    ])
+    await process_stream(stream, on_event=events.append)
+    reads = [e for e in events if e["type"] == "read"]
+    assert len(reads) == 2
+    assert reads[0]["url"] == "https://reuters.com/a"
+    assert reads[0]["title"] == "Pepsi Q4"
+    assert reads[1]["url"] == "https://ft.com/b"
+
+
+async def test_process_stream_accumulates_body_from_text_deltas():
+    events: list[dict] = []
+    stream = _AsyncIter([
+        _delta("Pepsi Global "),
+        _delta("revenue grew 8.2% YoY."),
+    ])
+    body, _, _ = await process_stream(stream, on_event=events.append)
+    assert body == "Pepsi Global revenue grew 8.2% YoY."
+
+
+async def test_process_stream_collects_citations_from_text_block_stop():
+    events: list[dict] = []
+    citation = _citation("https://reuters.com/a", "Pepsi Q4", "Revenue grew 8.2% YoY.", 0, 31)
+    stream = _AsyncIter([
+        _delta("Pepsi Global revenue grew 8.2%."),
+        _stop(_text_block("Pepsi Global revenue grew 8.2%.", citations=[citation])),
+    ])
+    _, citations, spans = await process_stream(stream, on_event=events.append)
+    assert len(citations) == 1
+    assert citations[0]["url"] == "https://reuters.com/a"
+    assert citations[0]["domain"] == "reuters.com"
+    assert citations[0]["id"] == 1
+    assert spans == [{"start": 0, "end": 31, "citation_ids": [1]}]
+
+
+async def test_process_stream_dedupes_citations_by_url():
+    """Two citations for the same URL = one entry in citations, two spans."""
+    cit1 = _citation("https://reuters.com/a", "Pepsi Q4", "Snippet A", 0, 20)
+    cit2 = _citation("https://reuters.com/a", "Pepsi Q4", "Snippet B", 50, 70)
+    events: list[dict] = []
+    stream = _AsyncIter([
+        _stop(_text_block("...", citations=[cit1, cit2])),
+    ])
+    _, citations, spans = await process_stream(stream, on_event=events.append)
+    assert len(citations) == 1
+    assert len(spans) == 2
+    assert all(s["citation_ids"] == [1] for s in spans)
+
+
+async def test_process_stream_emits_synthesizing_note_at_end():
+    """After the stream ends the worker is doing final synthesis — surface that."""
+    events: list[dict] = []
+    stream = _AsyncIter([])
+    await process_stream(stream, on_event=events.append)
+    notes = [e for e in events if e["type"] == "note"]
+    assert notes and "Synthesizing" in notes[0]["text"]
