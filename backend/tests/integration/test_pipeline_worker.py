@@ -49,7 +49,14 @@ async def test_run_research_task_sets_job_status_and_enqueues_next(db, monkeypat
     assert ctx["redis"].enqueue_job.await_args.args[0] == "run_benchmarks"
 
 
-async def test_task_marks_failed_after_max_tries(db, monkeypatch):
+async def test_task_marks_failed_and_emits_pipeline_error_on_exception(db, monkeypatch):
+    """Any phase exception is terminal: state -> 'failed' + pipeline_error broadcast.
+
+    ARQ does NOT auto-retry on a bare ``raise`` (that requires the explicit
+    ``arq.jobs.Retry`` exception). The smoke test confirmed this; the worker
+    records every failure as terminal so the user can re-attempt via
+    POST /chat/{id}/retry.
+    """
     from app.services.ai.research_agent import ResearchAgent
 
     proposal = await _make_proposal(db)
@@ -59,8 +66,8 @@ async def test_task_marks_failed_after_max_tries(db, monkeypatch):
         raise RuntimeError("LLM down")
 
     monkeypatch.setattr(ResearchAgent, "research_client", boom)
-    ctx = _ctx(job_try=worker.ARQ_MAX_TRIES)  # last attempt
-    await worker.run_research(ctx, pid)  # must NOT raise on the final try
+    ctx = _ctx()
+    await worker.run_research(ctx, pid)  # must NOT raise
 
     from app.infrastructure.db.database import async_session_factory
     async with async_session_factory() as fresh:
@@ -68,17 +75,8 @@ async def test_task_marks_failed_after_max_tries(db, monkeypatch):
         assert refetched.pipeline_state["job_status"]["state"] == "failed"
         assert "LLM down" in refetched.pipeline_state["job_status"]["error"]
 
-
-async def test_task_reraises_to_retry_before_max_tries(db, monkeypatch):
-    from app.services.ai.research_agent import ResearchAgent
-
-    proposal = await _make_proposal(db)
-    pid = str(proposal.id)
-
-    async def boom(self, *a, **k):
-        raise RuntimeError("transient")
-
-    monkeypatch.setattr(ResearchAgent, "research_client", boom)
-    ctx = _ctx(job_try=1)  # not the last attempt
-    with pytest.raises(RuntimeError, match="transient"):
-        await worker.run_research(ctx, pid)
+    # The pipeline_error broadcast went to Redis
+    calls = ctx["redis"].publish.await_args_list
+    assert calls, "expected a publish() call for the pipeline_error event"
+    # Subsequent phase should NOT be enqueued on failure
+    ctx["redis"].enqueue_job.assert_not_called()

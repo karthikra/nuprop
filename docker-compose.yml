@@ -67,7 +67,7 @@ services:
       "
 
   worker:
-    env_file: .env.docker
+    env_file: .env.docker  # supplies ANTHROPIC_API_KEY, VOYAGE_API_KEY, RESEND_API_KEY
     build:
       context: .
       dockerfile: Dockerfile
@@ -75,11 +75,8 @@ services:
       ENVIRONMENT: production
       DEBUG: "false"
       DATABASE_URL: postgresql+asyncpg://nuprop:nuprop_dev_password@db:5432/nuprop
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       REDIS_ENABLED: "true"
       REDIS_URL: redis://redis:6379/0
-      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
-      RESEND_API_KEY: ${RESEND_API_KEY:-}
     volumes:
       - appdata:/data
     depends_on:

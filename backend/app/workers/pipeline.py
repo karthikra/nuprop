@@ -45,7 +45,14 @@ async def _set_job_status(session, proposal_id, phase, state, error=None) -> Non
 
 
 async def _run_phase(ctx: dict, phase: str, proposal_id: str) -> None:
-    """Shared task body: status bookkeeping + retry-to-failed handling."""
+    """Shared task body: status bookkeeping + terminal-on-error handling.
+
+    ARQ treats any uncaught exception as terminal (it does NOT auto-retry on a
+    bare ``raise`` — that requires ``raise arq.jobs.Retry()`` explicitly). So
+    every failure here is recorded as ``state="failed"`` with a
+    ``pipeline_error`` WS broadcast; re-attempts happen via the
+    ``POST /chat/{id}/retry`` endpoint, which re-enqueues the phase.
+    """
     async with async_session_factory() as session:
         await _set_job_status(session, proposal_id, phase, "running")
 
@@ -55,14 +62,12 @@ async def _run_phase(ctx: dict, phase: str, proposal_id: str) -> None:
             await getattr(svc, phase)(proposal_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("pipeline phase %s failed for %s", phase, proposal_id)
-        if ctx["job_try"] >= ARQ_MAX_TRIES:
-            async with async_session_factory() as session:
-                await _set_job_status(session, proposal_id, phase, "failed", str(exc))
-            await publish(ctx["redis"], proposal_id, {
-                "type": "pipeline_error", "phase": phase, "error": str(exc),
-            })
-            return  # swallow on the final try — job is "done" (failed)
-        raise  # let ARQ retry
+        async with async_session_factory() as session:
+            await _set_job_status(session, proposal_id, phase, "failed", str(exc))
+        await publish(ctx["redis"], proposal_id, {
+            "type": "pipeline_error", "phase": phase, "error": str(exc),
+        })
+        return  # don't re-raise — terminal failure is recorded; user retries via /retry
 
     async with async_session_factory() as session:
         await _set_job_status(session, proposal_id, phase, "complete")
