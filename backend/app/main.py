@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from app.core.config import get_settings
 from app.core.seed import seed_templates
 from app.infrastructure.db.database import Base, async_session_factory, engine
 from app.infrastructure.db.models import *  # noqa: F401, F403 — register all models
+from app.infrastructure.queue.events import ws_event_subscriber
+from app.infrastructure.queue.redis import create_arq_pool
 from app.views.v1.proposal_site import router as proposal_site_router
 from app.views.v1.router import api_router
 
@@ -31,7 +34,18 @@ async def lifespan(app: FastAPI):
         if count:
             await db.commit()
 
+    # Background-worker plumbing: ARQ pool for enqueueing + WS event subscriber
+    app.state.arq_pool = await create_arq_pool()
+    app.state.ws_subscriber_task = asyncio.create_task(ws_event_subscriber())
+
     yield
+
+    app.state.ws_subscriber_task.cancel()
+    try:
+        await app.state.ws_subscriber_task
+    except asyncio.CancelledError:
+        pass
+    await app.state.arq_pool.aclose()
     await engine.dispose()
 
 
