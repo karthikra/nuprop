@@ -235,40 +235,110 @@ class PipelineService:
         proposal = await self.proposal_repo.get_by_id(proposal_id)
         if proposal is None:
             return
-        brief = proposal.brief
-        deliverables = brief.get("project", {}).get("deliverables", [])
-        template_config = await self._load_template_config(proposal)
-        benchmark_queries = (
-            (template_config or {}).get("research", {}).get("benchmark_queries")
-        )
 
-        await self._emit_progress(proposal_id, "benchmarks", "searching", "Finding pricing benchmarks...")
-        benchmarks_md = await BenchmarkAgent().find_benchmarks(deliverables, "India", benchmark_queries)
-        await self.proposal_repo.update(proposal.id, benchmarks=benchmarks_md)
-        await self.session.commit()                       # commit BEFORE broadcast
-        await self._emit_progress(proposal_id, "benchmarks", "complete", "Pricing benchmarks done")
+        from app.services.ai.benchmark_agent import BENCHMARK_SYSTEM
 
-        # combined research + benchmarks findings message
-        proposal = await self.proposal_repo.get_by_id(proposal_id)
-        summary = (
-            f"**Research and benchmarking complete.**\n\n---\n\n"
-            f"{proposal.research}\n\n---\n\n{benchmarks_md}"
-        )
-        msg = await self.msg_repo.create(
+        # 1. Pre-flight plan.
+        plan = await generate_benchmarks_plan(brief=proposal.brief or {})
+        plan_msg = await self.msg_repo.create(
             proposal_id=proposal_id,
             role=MessageRole.ASSISTANT.value,
-            message_type=MessageType.RESEARCH_FINDINGS.value,
-            content=summary,
-            extra_data={"has_research": True, "has_benchmarks": True},
-            phase="research",
+            message_type="benchmarks_plan",
+            content="",
+            extra_data={"phase": "benchmarks", **plan},
+            phase="benchmarks",
         )
-        # advance pipeline
-        pipeline = proposal.pipeline_state.copy()
+        await self.session.commit()
+        await self._emit_message(proposal_id, plan_msg)
+
+        # 2. Activity log.
+        log_msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.ASSISTANT.value,
+            message_type="benchmarks_activity_log",
+            content="",
+            extra_data={"phase": "benchmarks", "status": "running", "events": []},
+            phase="benchmarks",
+        )
+        await self.session.commit()
+        await self._emit_message(proposal_id, log_msg)
+
+        # 3. Streaming Sonnet 4.6 call with web_search.
+        flusher = ActivityFlusher(
+            session=self.session,
+            msg_repo=self.msg_repo,
+            redis=self.redis,
+            log_msg_id=log_msg.id,
+            proposal_id=proposal_id,
+            phase="benchmarks",
+        )
+
+        deliverables = (proposal.brief or {}).get("project", {}).get("deliverables", []) or []
+        categories = sorted({d.get("category", "") for d in deliverables if d.get("category")})
+        country = "India"  # NUPROP is India-focused; future: pull from agency settings.
+        user_msg = (
+            f"Find pricing benchmarks for these design / creative-agency services in {country}: "
+            + ", ".join(categories or ["general design services"])
+            + ". Search the web for real published data."
+        )
+
+        # Build the system-prompt substitutions — same pattern as BenchmarkAgent.find_benchmarks
+        # (benchmark_agent.py:74-83). BENCHMARK_SYSTEM is a str.format template with
+        # {max_searches} and {categories_section} placeholders; pass the raw template
+        # to Bedrock and the model receives literal curly-brace text.
+        max_searches = 8
+        categories_section = (
+            "\n".join(f"- {c}" for c in categories)
+            if categories else "- General design agency services"
+        )
+        system_prompt = BENCHMARK_SYSTEM.format(
+            max_searches=max_searches,
+            categories_section=categories_section,
+        )
+
+        ai = get_ai_service()
+        try:
+            async with ai.client.messages.stream(
+                model=ai.model_for(Tier.BALANCED),     # Sonnet 4.6
+                max_tokens=4096,
+                system=system_prompt,
+                tools=[{
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": max_searches,
+                }],
+                messages=[{"role": "user", "content": user_msg}],
+            ) as stream:
+                body, citations, spans = await process_stream(stream, on_event=flusher.append)
+            await flusher.flush(final_status="complete")
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("run_benchmarks streaming failed for %s", proposal_id)
+            try:
+                await flusher.flush(final_status="failed", error=str(exc))
+            except Exception:  # noqa: BLE001
+                logger.exception("flusher.flush failed during exception handling")
+            raise
+
+        # 4. Findings — annotated, separate message from research_findings.
+        findings_msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.ASSISTANT.value,
+            message_type="benchmarks_findings",
+            content=body,
+            extra_data={"phase": "benchmarks", "citations": citations, "spans": spans},
+            phase="benchmarks",
+        )
+        await self.proposal_repo.update(proposal.id, benchmarks=body)
+        await self.session.commit()
+        await self._emit_message(proposal_id, findings_msg)
+
+        # Advance pipeline state to cost_model_review (unchanged from previous behaviour).
+        proposal = await self.proposal_repo.get_by_id(proposal_id)
+        pipeline = (proposal.pipeline_state or {}).copy()
         pipeline["phases_completed"] = pipeline.get("phases_completed", []) + ["research"]
         pipeline["current_phase"] = "cost_model_review"
         await self.proposal_repo.update(proposal.id, pipeline_state=pipeline)
-        await self.session.commit()                       # commit BEFORE broadcast
-        await self._emit_message(proposal_id, msg)
+        await self.session.commit()
         await self._emit_phase_change(proposal_id, "cost_model_review")
 
     async def build_cost_model(self, proposal_id: UUID | str) -> None:

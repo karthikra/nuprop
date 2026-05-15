@@ -218,3 +218,108 @@ async def test_run_research_formats_system_prompt_with_no_remaining_placeholders
     # contain a JSON example with braces.
     for placeholder in ("{client_name}", "{max_searches}", "{context_section}", "{template_section}"):
         assert placeholder not in system_arg, f"unformatted placeholder in system prompt: {placeholder}"
+
+
+async def test_run_benchmarks_emits_separate_findings_message_with_benchmarks_phase(
+    db, monkeypatch,
+):
+    proposal = await _make_proposal(
+        db,
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": [{"category": "Logo"}]}},
+    )
+
+    monkeypatch.setattr(
+        "app.services.pipeline_service.generate_benchmarks_plan",
+        AsyncMock(return_value={
+            "queries": ["logo design India rates 2024"],
+            "rationale": "Find India-specific rate ranges.",
+        }),
+    )
+
+    body_text = "Typical India logo design rates: 50k-3 lakh."
+    cited = "50k-3 lakh"
+    fake_events = [
+        _start(SimpleNamespace(type="tool_use", name="web_search",
+                                input={"query": "logo design India rates 2024"})),
+        _stop(SimpleNamespace(type="tool_use", name="web_search",
+                               input={"query": "logo design India rates 2024"})),
+        _stop(SimpleNamespace(type="web_search_tool_result", content=[
+            SimpleNamespace(url="https://example.com/rates", title="India rate card"),
+        ])),
+        _delta(body_text),
+        _stop(SimpleNamespace(
+            type="text", text=body_text,
+            citations=[SimpleNamespace(
+                type="web_search_result_location",
+                url="https://example.com/rates", title="India rate card",
+                cited_text=cited, encrypted_index="enc",
+            )],
+        )),
+    ]
+    mock_ai = MagicMock()
+    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext(fake_events))
+    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-sonnet-4-6")
+    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+
+    svc = PipelineService(db, AsyncMock())
+    await svc.run_benchmarks(proposal.id)
+
+    async with async_session_factory() as fresh:
+        msgs = await ChatMessageRepository(fresh).list_by_proposal(proposal.id)
+    types = [m.message_type for m in msgs]
+    assert "benchmarks_plan" in types
+    assert "benchmarks_activity_log" in types
+    assert "benchmarks_findings" in types
+    # The OLD combined "research_findings"-with-both-bodies emit is gone.
+    findings_count = sum(1 for m in msgs if m.message_type == "research_findings")
+    assert findings_count == 0  # this test only ran benchmarks, not research
+
+    findings = next(m for m in msgs if m.message_type == "benchmarks_findings")
+    assert findings.extra_data["phase"] == "benchmarks"
+    assert "50k-3 lakh" in findings.content
+
+
+async def test_run_benchmarks_uses_balanced_sonnet_tier(monkeypatch, db):
+    proposal = await _make_proposal(db)
+    monkeypatch.setattr(
+        "app.services.pipeline_service.generate_benchmarks_plan",
+        AsyncMock(return_value={"queries": [], "rationale": ""}),
+    )
+    mock_ai = MagicMock()
+    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext([]))
+    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-sonnet-4-6")
+    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+
+    svc = PipelineService(db, AsyncMock())
+    await svc.run_benchmarks(proposal.id)
+
+    from app.services.llm import Tier
+    mock_ai.model_for.assert_called_with(Tier.BALANCED)
+
+
+async def test_run_benchmarks_formats_system_prompt_with_no_remaining_placeholders(db, monkeypatch):
+    """Regression: BENCHMARK_SYSTEM is a str.format template with
+    {max_searches} and {categories_section} placeholders. The worker must
+    substitute them before sending to Bedrock."""
+    proposal = await _make_proposal(
+        db,
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": [{"category": "Logo"}]}},
+    )
+    monkeypatch.setattr(
+        "app.services.pipeline_service.generate_benchmarks_plan",
+        AsyncMock(return_value={"queries": [], "rationale": ""}),
+    )
+    mock_ai = MagicMock()
+    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext([]))
+    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-sonnet-4-6")
+    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+
+    svc = PipelineService(db, AsyncMock())
+    await svc.run_benchmarks(proposal.id)
+
+    kwargs = mock_ai.client.messages.stream.call_args.kwargs
+    system_arg = kwargs["system"]
+    for placeholder in ("{max_searches}", "{categories_section}"):
+        assert placeholder not in system_arg, f"unformatted placeholder in system prompt: {placeholder}"
+    # The categories section should mention "Logo" (the deliverable category).
+    assert "Logo" in system_arg
