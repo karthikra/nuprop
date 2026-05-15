@@ -10,16 +10,15 @@ Two responsibilities split into well-named units:
 - :func:`process_stream` — pure(ish) async function that consumes an
   Anthropic SDK message-stream and converts it into ``ActivityEvent`` calls
   to a provided callback while accumulating the final body, citation list,
-  and span list. (Added in the next task.)
+  and span list.
 """
 
 from __future__ import annotations
 
-import inspect
 import logging
 from datetime import datetime, timezone
 from time import monotonic
-from typing import Any, Awaitable, Callable, Union
+from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -110,7 +109,7 @@ class ActivityFlusher:
 CitationRef = dict[str, Any]
 Span = dict[str, Any]
 ActivityEvent = dict[str, Any]
-EventCallback = Callable[[ActivityEvent], Union[Awaitable[None], None]]
+EventCallback = Callable[[ActivityEvent], Awaitable[None]]
 
 
 def _now_iso() -> str:
@@ -122,16 +121,6 @@ def _parse_domain(url: str) -> str:
         return urlparse(url).netloc or url
     except Exception:  # noqa: BLE001
         return url
-
-
-async def _invoke_event_cb(on_event: EventCallback, event: ActivityEvent) -> None:
-    """Call on_event, awaiting if it returned a coroutine.
-
-    Tolerates both sync callbacks (e.g. ``list.append``) and async ones.
-    """
-    result = on_event(event)
-    if inspect.isawaitable(result):
-        await result
 
 
 async def process_stream(
@@ -146,6 +135,14 @@ async def process_stream(
     - body: the concatenated assistant text (the markdown findings body)
     - citations: deduped-by-URL list of CitationRef dicts
     - spans: list of Span dicts referencing citations by their ``id``
+
+    Span offsets are computed from the accumulated body text by matching
+    each citation's ``cited_text`` as a verbatim substring. The Anthropic
+    SDK's ``CitationsWebSearchResultLocation`` carries only ``url``,
+    ``title``, ``cited_text`` and ``encrypted_index`` — there are no
+    character-offset fields to read directly. Citations whose ``cited_text``
+    isn't a verbatim substring of the surrounding text block are skipped
+    rather than emitted as degenerate ``{start: 0, end: 0}`` spans.
     """
     body_parts: list[str] = []
     citations: list[CitationRef] = []
@@ -162,19 +159,12 @@ async def process_stream(
             if block_type == "tool_use" and getattr(block, "name", None) == "web_search":
                 query = (getattr(block, "input", {}) or {}).get("query", "")
                 if query:
-                    await _invoke_event_cb(
-                        on_event,
-                        {"type": "search", "query": query, "ts": _now_iso()},
+                    await on_event(
+                        {"type": "search", "query": query, "ts": _now_iso()}
                     )
-            elif block_type == "web_search_tool_result":
-                for result in (getattr(block, "content", None) or []):
-                    url = getattr(result, "url", "")
-                    title = getattr(result, "title", "") or _parse_domain(url)
-                    if url:
-                        await _invoke_event_cb(
-                            on_event,
-                            {"type": "read", "url": url, "title": title, "ts": _now_iso()},
-                        )
+            # NOTE: web_search_tool_result.content is populated by
+            # content_block_stop time, not _start. Result URLs are emitted
+            # from the _stop branch below.
 
         elif event_type == "content_block_delta":
             delta = getattr(event, "delta", None)
@@ -186,27 +176,46 @@ async def process_stream(
             if block is None:
                 continue
             block_type = getattr(block, "type", None)
-            if block_type == "tool_use" and getattr(block, "name", None) == "web_search":
-                # If the query wasn't captured at start (e.g. it arrives via
-                # input_json_delta before the input is finalized), the final
-                # block state would let us recover it here. The start path
-                # above captures the common case; this is reserved for SDK
-                # variations and intentionally a no-op today.
-                pass
+            if block_type == "web_search_tool_result":
+                # Results are materialized by stop-time in the real SDK.
+                for result in (getattr(block, "content", None) or []):
+                    url = getattr(result, "url", "")
+                    title = getattr(result, "title", "") or _parse_domain(url)
+                    if url:
+                        await on_event(
+                            {"type": "read", "url": url, "title": title, "ts": _now_iso()}
+                        )
             elif block_type == "text":
+                block_text = getattr(block, "text", "") or ""
+                # The accumulated body so far ends with this block's text.
+                # Compute where this block starts within the full body so
+                # span offsets are body-relative, not block-relative.
+                text_offset = sum(len(p) for p in body_parts) - len(block_text)
+                # Cursor for multi-citation blocks — each citation searches
+                # after the previous match to avoid overlapping spans when
+                # the same snippet appears twice.
+                cursor = 0
                 for c in (getattr(block, "citations", None) or []):
+                    cited = getattr(c, "cited_text", "") or ""
+                    if not cited:
+                        continue
+                    idx = block_text.find(cited, cursor)
+                    if idx < 0:
+                        # cited_text isn't a verbatim substring — Claude may
+                        # have paraphrased very slightly. Skip rather than
+                        # writing a degenerate span. Future v2: fuzzy match.
+                        continue
+                    start = text_offset + idx
+                    end = start + len(cited)
+                    cursor = idx + len(cited)
                     cit = _ensure_citation(citations, c)
-                    spans.append({
-                        "start": getattr(c, "start_block_index", 0),
-                        "end": getattr(c, "end_block_index", 0),
-                        "citation_ids": [cit["id"]],
-                    })
+                    spans.append(
+                        {"start": start, "end": end, "citation_ids": [cit["id"]]}
+                    )
 
     # A trailing note — gives the user a "synthesizing..." beat in the UI
     # between the last tool result and the findings card arriving.
-    await _invoke_event_cb(
-        on_event, {"type": "note", "text": "Synthesizing findings...", "ts": _now_iso()}
-    )
+    await on_event({"type": "note", "text": "Synthesizing findings...", "ts": _now_iso()})
 
     return "".join(body_parts), citations, spans
 
