@@ -234,6 +234,109 @@ class PipelineService:
         await self._emit_progress(proposal_id, "cost_model", "complete", "Cost model ready for review")
         await self._emit_message(proposal_id, msg)
 
+    async def generate_narrative(self, proposal_id: UUID | str) -> None:
+        """Generate all narrative sections.
+
+        Extraction of ChatViewModel._generate_narrative — agency/rate-card loads
+        kept inline because they were inline in the source; template config goes
+        through _load_template_config + _merge_preferences_into_config.
+        """
+        from app.infrastructure.db.models.agency import Agency
+        from app.infrastructure.db.models.rate_card import RateCard
+
+        proposal = await self.proposal_repo.get_by_id(proposal_id)
+        if proposal is None:
+            return
+
+        result = await self.session.execute(
+            select(Agency).where(Agency.id == str(proposal.agency_id))
+        )
+        agency = result.scalar_one_or_none()
+
+        template_config = await self._load_template_config(proposal)
+
+        result = await self.session.execute(
+            select(RateCard)
+            .where(RateCard.agency_id == str(proposal.agency_id), RateCard.is_active == True)
+            .limit(1)
+        )
+        rate_card = result.scalar_one_or_none()
+
+        effective_config = self._merge_preferences_into_config(
+            template_config, proposal.preferences or {}
+        )
+
+        await self._emit_progress(
+            proposal_id, "narrative", "searching", "Writing covering letter (2 variants)..."
+        )
+
+        narr = await NarrativeGenerator().generate_all(
+            brief=proposal.brief,
+            research=proposal.research,
+            benchmarks=proposal.benchmarks,
+            cost_model=proposal.cost_model or {},
+            template_config=effective_config,
+            agency_name=agency.name if agency else "the agency",
+            agency_voice=agency.voice_profile if agency else None,
+            agency_default_terms=agency.default_terms if agency else None,
+            agency_payment_terms=agency.payment_terms if agency else None,
+            agency_gst_rate=agency.gst_rate if agency else 0.18,
+            rate_card_offerings=rate_card.offerings if rate_card else None,
+            standard_options=rate_card.standard_options if rate_card else 3,
+            standard_revisions=rate_card.standard_revisions if rate_card else 2,
+        )
+
+        await self.proposal_repo.update(
+            proposal.id,
+            covering_letter=narr.covering_letter,
+            covering_letter_alt=narr.covering_letter_alt,
+            executive_summary=narr.executive_summary,
+            scope_sections=narr.scope_sections,
+            cost_rationale=narr.cost_rationale,
+            terms=narr.terms,
+        )
+
+        pipeline = proposal.pipeline_state.copy()
+        pipeline["phases_completed"] = pipeline.get("phases_completed", []) + ["narrative_generation"]
+        pipeline["current_phase"] = "narrative_review"
+        await self.proposal_repo.update(proposal.id, pipeline_state=pipeline)
+        await self.session.commit()                       # commit BEFORE broadcast
+
+        await self._emit_progress(proposal_id, "narrative", "complete", "Narrative ready for review")
+        await self._emit_phase_change(proposal_id, "narrative_review")
+
+        scope_count = len(narr.scope_sections)
+        content = (
+            f"**Proposal narrative ready for review.**\n\n"
+            f"I've written two covering letter variants ({narr.letter_strategy_primary} and {narr.letter_strategy_alt}), "
+            f"the executive summary, {scope_count} scope descriptions"
+            f"{', cost rationale,' if narr.cost_rationale else ''} and terms & conditions.\n\n"
+            f"Review each section below and approve when ready."
+        )
+        msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.ASSISTANT.value,
+            message_type=MessageType.NARRATIVE_PREVIEW.value,
+            content=content,
+            extra_data={
+                "requires_approval": True,
+                "gate_type": "narrative",
+                "sections": {
+                    "covering_letter": narr.covering_letter,
+                    "covering_letter_alt": narr.covering_letter_alt,
+                    "letter_strategy_primary": narr.letter_strategy_primary,
+                    "letter_strategy_alt": narr.letter_strategy_alt,
+                    "executive_summary": narr.executive_summary,
+                    "scope_sections": narr.scope_sections,
+                    "cost_rationale": narr.cost_rationale,
+                    "terms": narr.terms,
+                },
+            },
+            phase="narrative_review",
+        )
+        await self.session.commit()
+        await self._emit_message(proposal_id, msg)
+
     @staticmethod
     def _merge_preferences_into_config(template_config: dict | None, preferences: dict) -> dict:
         """Overlay user preferences onto template config for AI services."""

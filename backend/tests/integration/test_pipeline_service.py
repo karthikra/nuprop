@@ -131,3 +131,38 @@ async def test_build_cost_model_commits_model_and_creates_message(db):
         assert refetched.cost_model.get("line_items")
         msgs = await ChatMessageRepository(fresh).list_by_proposal(pid)
         assert any(m.message_type == "cost_model" for m in msgs)
+
+
+async def test_generate_narrative_commits_sections_and_advances_pipeline(db, monkeypatch):
+    from app.services.ai.narrative_generator import NarrativeGenerator
+
+    agency, _, proposal = await _make_proposal(
+        db,
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "narrative_generation", "phases_completed": ["research"]},
+    )
+    pid = proposal.id
+
+    class _Narr:
+        covering_letter = "Dear Acme,"
+        covering_letter_alt = "Hi Acme,"
+        executive_summary = "Summary."
+        scope_sections = [{"title": "Logo", "body": "..."}]
+        cost_rationale = "Because."
+        terms = "Net 30."
+        letter_strategy_primary = "confident"
+        letter_strategy_alt = "warm"
+
+    async def fake_generate_all(self, **kwargs):
+        return _Narr()
+
+    monkeypatch.setattr(NarrativeGenerator, "generate_all", fake_generate_all)
+    svc = PipelineService(db, AsyncMock())
+    await svc.generate_narrative(pid)
+
+    from app.infrastructure.db.database import async_session_factory
+    async with async_session_factory() as fresh:
+        refetched = await ProposalRepository(fresh).get_by_id(pid)
+        assert refetched.covering_letter == "Dear Acme,"
+        assert refetched.executive_summary == "Summary."
+        assert refetched.pipeline_state["current_phase"] == "narrative_review"
