@@ -1,17 +1,49 @@
+"""Backward-compatible facade over ``app.services.llm.AIService``.
+
+Existing AI agents (BriefAnalyzer, ResearchAgent, BenchmarkAgent, CostModelBuilder,
+NarrativeGenerator, EmailClassifier, ContextService) call ``AnthropicClient()``
+and use ``.complete()`` / ``.complete_json()`` / ``.stream()`` / ``.is_configured``.
+
+This module preserves that surface so the agents don't need code changes, but
+internally every call goes through ``AIService`` → ``AsyncAnthropicBedrock``.
+Direct ``anthropic.AsyncAnthropic`` use is gone — all inference routes through
+AWS Bedrock per the project's CLAUDE.md policy.
+
+The class-level method names are what ``tests/conftest.py:_no_network`` patches,
+so this surface must stay stable for the test guard to keep working.
+"""
+
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncGenerator
 
-import anthropic
-
 from app.core.config import get_settings
+from app.services.llm import AIService, Tier, get_ai_service
+
+
+def _tier_for_model(model_id: str | None) -> Tier | None:
+    """Resolve a Bedrock model ID to its tier — supports legacy callers that
+    pass ``model=settings.ANTHROPIC_OPUS_MODEL`` rather than a Tier."""
+    if not model_id:
+        return None
+    settings = get_settings()
+    if model_id == settings.ANTHROPIC_OPUS_MODEL:
+        return Tier.HEAVY
+    if model_id == settings.ANTHROPIC_HAIKU_MODEL:
+        return Tier.FAST
+    if model_id == settings.ANTHROPIC_DEFAULT_MODEL:
+        return Tier.BALANCED
+    return None  # unknown → let AIService use its default tier
 
 
 class AnthropicClient:
-    def __init__(self):
+    """Facade over :class:`AIService`. New code should use ``AIService`` directly;
+    this class exists so the existing agents (and the no-network test guard) work
+    unchanged after the Bedrock migration."""
+
+    def __init__(self) -> None:
+        self._ai: AIService = get_ai_service()
         settings = get_settings()
-        self._client = anthropic.AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
         self._default_model = settings.ANTHROPIC_DEFAULT_MODEL
         self._opus_model = settings.ANTHROPIC_OPUS_MODEL
 
@@ -23,14 +55,14 @@ class AnthropicClient:
         max_tokens: int = 4096,
         temperature: float = 0.7,
     ) -> str:
-        response = await self._client.messages.create(
-            model=model or self._default_model,
+        result = await self._ai.complete(
+            prompt=messages,
+            tier=_tier_for_model(model),
             system=system,
-            messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
         )
-        return response.content[0].text
+        return result.text
 
     async def complete_json(
         self,
@@ -39,22 +71,12 @@ class AnthropicClient:
         model: str | None = None,
         max_tokens: int = 4096,
     ) -> dict:
-        """Call Claude expecting a JSON response. Parses the output."""
-        text = await self.complete(
-            system=system + "\n\nRespond ONLY with valid JSON. No markdown, no explanation.",
-            messages=messages,
-            model=model,
+        return await self._ai.complete_json(
+            prompt=messages,
+            tier=_tier_for_model(model),
+            system=system,
             max_tokens=max_tokens,
-            temperature=0.3,
         )
-        # Strip markdown code fence if present
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        text = text.strip()
-        return json.loads(text)
 
     async def stream(
         self,
@@ -64,18 +86,20 @@ class AnthropicClient:
         max_tokens: int = 4096,
         temperature: float = 0.7,
     ) -> AsyncGenerator[str, None]:
-        """Yields text chunks as they arrive from the API."""
-        async with self._client.messages.stream(
-            model=model or self._default_model,
+        async for chunk in self._ai.stream(
+            prompt=messages,
+            tier=_tier_for_model(model),
             system=system,
-            messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
-        ) as stream:
-            async for text in stream.text_stream:
-                yield text
+        ):
+            yield chunk
 
     @property
     def is_configured(self) -> bool:
-        settings = get_settings()
-        return bool(settings.ANTHROPIC_API_KEY)
+        """Always True under Bedrock — auth comes from the AWS SDK credential
+        chain at call time, not from an in-process API key. Callers that gate on
+        ``is_configured`` no longer have a config check to make; Bedrock will
+        raise ``AccessDeniedException`` at the call site if creds are missing.
+        Tests still monkeypatch this to False to force fallback paths."""
+        return True

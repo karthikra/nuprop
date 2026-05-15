@@ -26,6 +26,8 @@ services:
       retries: 5
 
   app:
+    # .env.docker supplies VOYAGE_API_KEY, RESEND_API_KEY, GOOGLE_/SLACK_CLIENT_*, etc.
+    # Claude inference goes through AWS Bedrock — see AWS_* below; never set ANTHROPIC_API_KEY.
     env_file: .env.docker
     build:
       context: .
@@ -36,13 +38,18 @@ services:
       ENVIRONMENT: production
       DEBUG: "false"
       DATABASE_URL: postgresql+asyncpg://nuprop:nuprop_dev_password@db:5432/nuprop
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       JWT_SECRET_KEY: local-dev-jwt-secret-change-in-real-prod
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       CORS_ORIGINS: '["http://localhost:8080"]'
       PROPOSAL_SITE_DOMAIN: localhost:8080
       REDIS_ENABLED: "true"
       REDIS_URL: redis://redis:6379/0
+      # AWS Bedrock auth — forwarded from host shell via the SDK credential chain
+      AWS_REGION: ${AWS_REGION:-ap-northeast-1}
+      # AWS_PROFILE / AWS_*_KEY are intentionally NOT forwarded with `${VAR:-}`:
+      # an empty-string default sets the env var to "" which boto3 then treats
+      # as an explicit (broken) profile name. Mounting ~/.aws read-only is
+      # enough — boto3 uses the [default] profile when no env var is set.
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: http://localhost:8080/settings/gmail-callback
@@ -53,6 +60,7 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY:-}
     volumes:
       - appdata:/data
+      - ${HOME}/.aws:/root/.aws:ro  # mount host AWS profile config (read-only)
     depends_on:
       db:
         condition: service_healthy
@@ -67,7 +75,7 @@ services:
       "
 
   worker:
-    env_file: .env.docker  # supplies ANTHROPIC_API_KEY, VOYAGE_API_KEY, RESEND_API_KEY
+    env_file: .env.docker
     build:
       context: .
       dockerfile: Dockerfile
@@ -77,8 +85,15 @@ services:
       DATABASE_URL: postgresql+asyncpg://nuprop:nuprop_dev_password@db:5432/nuprop
       REDIS_ENABLED: "true"
       REDIS_URL: redis://redis:6379/0
+      # AWS Bedrock auth — same plumbing as the app process
+      AWS_REGION: ${AWS_REGION:-ap-northeast-1}
+      # AWS_PROFILE / AWS_*_KEY are intentionally NOT forwarded with `${VAR:-}`:
+      # an empty-string default sets the env var to "" which boto3 then treats
+      # as an explicit (broken) profile name. Mounting ~/.aws read-only is
+      # enough — boto3 uses the [default] profile when no env var is set.
     volumes:
       - appdata:/data
+      - ${HOME}/.aws:/root/.aws:ro
     depends_on:
       db:
         condition: service_healthy

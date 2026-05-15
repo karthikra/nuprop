@@ -43,11 +43,17 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     ARQ_MAX_TRIES: int = 3
 
-    # Anthropic
-    ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_DEFAULT_MODEL: str = "claude-sonnet-4-20250514"
-    ANTHROPIC_OPUS_MODEL: str = "claude-opus-4-20250514"
-    ANTHROPIC_HAIKU_MODEL: str = "claude-haiku-4-5-20251001"
+    # Anthropic via AWS Bedrock — never use direct Anthropic API.
+    # Auth comes from the AWS SDK credential chain (profile, env vars, instance role).
+    AWS_REGION: str = "ap-northeast-1"        # Tokyo — lowest latency from Bangalore
+    AWS_PROFILE: str | None = None             # optional; falls back to env/role if unset
+
+    # Bedrock global inference profile IDs — tiered model selection.
+    # Verified via `aws bedrock list-inference-profiles --region ap-northeast-1`.
+    # The skill's published IDs had wrong suffixes for Sonnet 4.6 and Haiku 4.5.
+    ANTHROPIC_DEFAULT_MODEL: str = "global.anthropic.claude-sonnet-4-6"           # balanced
+    ANTHROPIC_OPUS_MODEL: str = "global.anthropic.claude-opus-4-7"                # heavy
+    ANTHROPIC_HAIKU_MODEL: str = "global.anthropic.claude-haiku-4-5-20251001-v1:0"  # fast
 
     # Voyage (embeddings)
     VOYAGE_API_KEY: str = ""

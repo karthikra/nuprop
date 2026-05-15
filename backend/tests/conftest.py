@@ -18,11 +18,13 @@ from dataclasses import dataclass
 _TMP_DB_FD, _TMP_DB_PATH = tempfile.mkstemp(suffix=".db", prefix="nuprop_test_")
 os.close(_TMP_DB_FD)
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TMP_DB_PATH}"
-os.environ["ANTHROPIC_API_KEY"] = ""          # AI services fall back to non-LLM paths
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-not-for-production"
 os.environ["ENVIRONMENT"] = "test"
 os.environ["REDIS_ENABLED"] = "false"
 os.environ["DEBUG"] = "false"                 # keep SQLAlchemy engine echo quiet
+# AWS region pinned so AsyncAnthropicBedrock can be constructed without warnings;
+# no real Bedrock call is ever made — the _no_network guard below blocks them.
+os.environ.setdefault("AWS_REGION", "ap-northeast-1")
 
 from unittest.mock import AsyncMock  # noqa: E402
 
@@ -43,17 +45,21 @@ API = "/api/v1"
 # ── No-network guard ─────────────────────────────────────────────────────────
 @pytest.fixture(autouse=True)
 def _no_network(monkeypatch):
-    """Hard guard: no test may make a real Anthropic/LLM network call.
+    """Hard guard: no test may make a real Bedrock / LLM network call.
 
-    ``ANTHROPIC_API_KEY`` is already empty so ``is_configured`` is False, but
-    this makes any accidental call fail loudly instead of hanging on the
-    network. Tests that exercise an AI path monkeypatch the *service* method
-    (e.g. ``BriefAnalyzer.analyze``) or re-patch ``is_configured`` themselves —
-    those patches are applied after this fixture and therefore win.
+    Since the Bedrock migration, ``is_configured`` is always True at runtime
+    (auth comes from the AWS SDK credential chain at call time, not from a
+    config flag). The guard below forces it back to False during tests so AI
+    agents fall through to their non-LLM paths, AND replaces the real network
+    methods with a loud failure in case anything slips past the gate.
+
+    Tests that exercise an AI path monkeypatch the *service* method (e.g.
+    ``BriefAnalyzer.analyze``) — those patches are applied after this fixture
+    and therefore win.
     """
 
     async def _blocked(*args, **kwargs):  # noqa: ANN002, ANN003
-        raise RuntimeError("Real Anthropic API call attempted during a test")
+        raise RuntimeError("Real Bedrock/Anthropic API call attempted during a test")
 
     monkeypatch.setattr(AnthropicClient, "complete", _blocked, raising=False)
     monkeypatch.setattr(AnthropicClient, "complete_json", _blocked, raising=False)

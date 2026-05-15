@@ -61,7 +61,7 @@ class BenchmarkAgent:
     ) -> str:
         """Search for pricing benchmarks using Claude's native web search. Returns markdown."""
         if not self._client.is_configured:
-            return "# Market Benchmarks\n\n*AI not configured. Set ANTHROPIC_API_KEY to enable benchmarking.*"
+            return "# Market Benchmarks\n\n*AI not configured. Bedrock credentials missing — see CLAUDE.md.*"
 
         # Build categories section
         categories = set()

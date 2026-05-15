@@ -96,7 +96,7 @@ class ResearchAgent:
     ) -> str:
         """Research the client using Claude's native web search. Returns markdown."""
         if not self._client.is_configured:
-            return f"# Client Research: {client_name}\n\n*AI not configured. Set ANTHROPIC_API_KEY to enable research.*"
+            return f"# Client Research: {client_name}\n\n*AI not configured. Bedrock credentials missing — see CLAUDE.md.*"
 
         # Build context section
         context_section = ""
