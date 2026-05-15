@@ -15,6 +15,16 @@ services:
       timeout: 3s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   app:
     env_file: .env.docker
     build:
@@ -31,7 +41,8 @@ services:
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
       CORS_ORIGINS: '["http://localhost:8080"]'
       PROPOSAL_SITE_DOMAIN: localhost:8080
-      REDIS_ENABLED: "false"
+      REDIS_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URI: http://localhost:8080/settings/gmail-callback
@@ -45,6 +56,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     # Run Alembic migrations before starting the app
     command: >
       sh -c "
@@ -52,6 +65,30 @@ services:
         alembic upgrade head &&
         uvicorn app.main:app --host 0.0.0.0 --port 8080
       "
+
+  worker:
+    env_file: .env.docker
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://nuprop:nuprop_dev_password@db:5432/nuprop
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      REDIS_ENABLED: "true"
+      REDIS_URL: redis://redis:6379/0
+      VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+    volumes:
+      - appdata:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    working_dir: /app/backend
+    command: arq app.workers.pipeline.WorkerSettings
 
 volumes:
   pgdata:

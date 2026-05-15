@@ -6,10 +6,20 @@ primary_region = "bom"
 [deploy]
   release_command = "cd /app/backend && alembic upgrade head"
 
+# REDIS_URL must be set (Upstash Redis in production) for both the `app` and
+# `worker` processes — ARQ uses it to enqueue and drain pipeline jobs, and the
+# pub/sub channel relays WebSocket events from the worker to API replicas.
 [env]
   ENVIRONMENT = "production"
   DEBUG = "false"
   PORT = "8080"
+
+# Two long-running processes share the same image:
+#   app    — uvicorn (HTTP + WebSocket)
+#   worker — ARQ worker draining pipeline phase jobs from Redis
+[processes]
+  app = "uvicorn app.main:app --host 0.0.0.0 --port 8080"
+  worker = "arq app.workers.pipeline.WorkerSettings"
 
 [http_service]
   internal_port = 8080
@@ -17,6 +27,7 @@ primary_region = "bom"
   auto_stop_machines = "suspend"
   auto_start_machines = true
   min_machines_running = 1
+  processes = ["app"]
 
   [http_service.concurrency]
     type = "connections"
