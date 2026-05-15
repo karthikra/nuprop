@@ -45,16 +45,14 @@ async def send_message(
     agency_id: UUID = Depends(get_current_agency_id),
     vm: ChatViewModel = Depends(get_vm),
 ):
+    """Persist the user message. In the brief phase, returns just the user
+    message and enqueues analyze_brief — the assistant reply arrives via WS.
+    Outside the brief phase, returns [user, assistant].
+    """
     result = await vm.send_message(proposal_id, agency_id, body.content)
-    if not result:
+    if result is None:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
-
-    user_msg, assistant_msg = result
-    # WS broadcasting is handled inside the ViewModel
-    return [
-        ChatMessageResponse.model_validate(user_msg),
-        ChatMessageResponse.model_validate(assistant_msg),
-    ]
+    return [ChatMessageResponse.model_validate(m) for m in result]
 
 
 class ApproveGateRequest(BaseModel):
@@ -74,6 +72,27 @@ async def approve_gate(
     if not msg:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
     return ChatMessageResponse.model_validate(msg)
+
+
+@router.post("/{proposal_id}/retry", response_model=dict)
+async def retry_failed_phase(
+    proposal_id: UUID,
+    agency_id: UUID = Depends(get_current_agency_id),
+    vm: ChatViewModel = Depends(get_vm),
+):
+    """Re-enqueue the phase recorded as failed in pipeline_state.job_status."""
+    proposal = await vm.proposal_repo.get_by_id(proposal_id)
+    if not proposal or str(proposal.agency_id) != str(agency_id):
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    job_status = (proposal.pipeline_state or {}).get("job_status") or {}
+    if job_status.get("state") != "failed":
+        raise HTTPException(status_code=400, detail="No failed phase to retry")
+    phase = job_status["phase"]
+    pipeline = proposal.pipeline_state.copy()
+    pipeline["job_status"] = {"phase": phase, "state": "queued", "error": None}
+    await vm.proposal_repo.update(proposal_id, pipeline_state=pipeline)
+    await vm._enqueue(phase, proposal_id)
+    return {"phase": phase, "state": "queued"}
 
 
 class UpdateCostItemRequest(BaseModel):
