@@ -185,6 +185,55 @@ class PipelineService:
         await self._emit_message(proposal_id, msg)
         await self._emit_phase_change(proposal_id, "cost_model_review")
 
+    async def build_cost_model(self, proposal_id: UUID | str) -> None:
+        proposal = await self.proposal_repo.get_by_id(proposal_id)
+        if proposal is None:
+            return
+        template_config = await self._load_template_config(proposal)
+
+        await self._emit_progress(proposal_id, "cost_model", "searching", "Building cost model from rate card...")
+        model = await CostModelBuilder().build(
+            brief=proposal.brief,
+            db=self.session,
+            agency_id=str(proposal.agency_id),
+            benchmarks_md=proposal.benchmarks,
+            template_config=template_config,
+        )
+        cost_dict = CostModelBuilder.model_to_dict(model)
+        await self.proposal_repo.update(proposal.id, cost_model=cost_dict)
+        await self.session.commit()                       # commit BEFORE broadcast
+
+        # human-readable summary — verbatim from ChatViewModel._build_cost_model
+        lines = ["**Cost Model — Review & Approve**\n"]
+        lines.append(f"| Deliverable | Package | Qty | Unit Cost | Total | Match |")
+        lines.append(f"|---|---|---|---|---|---|")
+        for item in model.line_items:
+            lines.append(
+                f"| {item.deliverable} | {item.package_name[:40]} | {item.quantity} "
+                f"| ₹{item.unit_cost:,} | ₹{item.total:,} | {item.match_quality} |"
+            )
+        lines.append(f"\n**Subtotal**: ₹{model.subtotal:,}")
+        if model.discount_percent > 0:
+            lines.append(f"**Discount** ({model.discount_percent}%): −₹{model.discount_amount:,}")
+        lines.append(f"**Total (excl. GST)**: ₹{model.total:,}")
+        lines.append(f"**GST (18%)**: ₹{model.gst_amount:,}")
+        lines.append(f"**Grand Total**: ₹{model.grand_total:,}")
+        if model.multipliers_applied:
+            lines.append(f"\n*Multipliers applied: {', '.join(model.multipliers_applied)}*")
+        content = "\n".join(lines)
+
+        msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.ASSISTANT.value,
+            message_type=MessageType.COST_MODEL.value,
+            content=content,
+            extra_data={"cost_model": cost_dict, "requires_approval": True, "gate_type": "cost_model"},
+            phase="cost_model_review",
+        )
+        await self.session.commit()
+        await self._emit_progress(proposal_id, "cost_model", "complete", "Cost model ready for review")
+        await self._emit_message(proposal_id, msg)
+
     @staticmethod
     def _merge_preferences_into_config(template_config: dict | None, preferences: dict) -> dict:
         """Overlay user preferences onto template config for AI services."""
