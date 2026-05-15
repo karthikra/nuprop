@@ -59,6 +59,42 @@ class PipelineService:
     async def _emit_phase_change(self, proposal_id, phase: str) -> None:
         await self._emit(proposal_id, {"type": "phase_change", "phase": phase})
 
+    async def analyze_brief(self, proposal_id: UUID | str) -> None:
+        """Brief-intake phase. Extracted from ChatViewModel._handle_brief_phase."""
+        proposal = await self.proposal_repo.get_by_id(proposal_id)
+        if proposal is None:
+            logger.warning("analyze_brief: proposal %s not found", proposal_id)
+            return
+
+        all_messages = await self.msg_repo.list_by_proposal(proposal_id)
+        chat_history = [
+            {"role": m.role, "content": m.content}
+            for m in all_messages
+            if m.role in (MessageRole.USER.value, MessageRole.ASSISTANT.value)
+            and m.message_type == MessageType.TEXT.value
+        ]
+
+        result = await BriefAnalyzer().analyze(chat_history=chat_history, current_brief=proposal.brief)
+
+        msg_type = MessageType.TEXT.value
+        extra_data: dict = {}
+        if result.brief_complete:
+            msg_type = MessageType.BRIEF_SUMMARY.value
+            extra_data = {"brief": result.brief_data, "requires_approval": True}
+            await self.proposal_repo.update(proposal.id, brief=result.brief_data)
+
+        assistant_msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.ASSISTANT.value,
+            message_type=msg_type,
+            content=result.response_text,
+            extra_data=extra_data,
+            phase="brief",
+        )
+        await self.session.commit()          # commit BEFORE broadcasting
+        await self._emit_message(proposal_id, assistant_msg)
+        await self._emit(proposal_id, {"type": "typing", "typing": False})
+
     @staticmethod
     def _merge_preferences_into_config(template_config: dict | None, preferences: dict) -> dict:
         """Overlay user preferences onto template config for AI services."""
