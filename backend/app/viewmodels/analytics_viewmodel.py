@@ -17,14 +17,14 @@ from app.domain.schemas.analytics_schemas import (
 )
 from app.infrastructure.db.models.client import Client
 from app.infrastructure.db.models.proposal import Proposal
-from app.infrastructure.db.models.base import IS_SQLITE
 from app.infrastructure.db.repositories.analytics_repo import AnalyticsRepository
 from app.services.engagement_scorer import compute_visitor_score, compute_proposal_score
 from app.viewmodels.shared.viewmodel import ViewModelBase
 
 
 def _id(val):
-    return str(val) if IS_SQLITE else val
+    # Schema stores IDs as VARCHAR(36) on both backends; always coerce.
+    return str(val) if val is not None else None
 
 
 class AnalyticsViewModel(ViewModelBase):

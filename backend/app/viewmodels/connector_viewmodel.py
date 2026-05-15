@@ -8,7 +8,7 @@ from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.infrastructure.db.models.base import IS_SQLITE, _uuid_default
+from app.infrastructure.db.models.base import _uuid_default
 from app.infrastructure.db.repositories.agency_repo import AgencyRepository
 from app.infrastructure.db.repositories.client_repo import ClientRepository
 from app.infrastructure.db.repositories.email_index_repo import EmailIndexRepository
@@ -194,7 +194,7 @@ class ConnectorViewModel(ViewModelBase):
                     from app.infrastructure.db.models.email_index import EmailIndex
                     email = EmailIndex(
                         id=_uuid_default(),
-                        agency_id=str(agency_id) if IS_SQLITE else agency_id,
+                        agency_id=str(agency_id),
                         gmail_message_id=msg["id"],
                         gmail_thread_id=msg.get("thread_id", ""),
                         client_domain=domain,

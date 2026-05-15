@@ -6,7 +6,6 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infrastructure.db.models.base import IS_SQLITE
 from app.infrastructure.db.models.template import StrategyTemplate
 
 # Path to templates JSON — check multiple locations
@@ -51,7 +50,11 @@ async def seed_templates(db: AsyncSession) -> int:
             agency_id=None,
         )
         db.add(t)
+        # Per-row flush avoids SQLAlchemy's insertmanyvalues batching, which
+        # hits a UUID-sentinel-matching bug with asyncpg + PG_UUID on bulk
+        # INSERT...RETURNING. Seeding runs once at startup so the cost is
+        # trivial; production data writes don't share this pattern.
+        await db.flush()
         count += 1
 
-    await db.flush()
     return count

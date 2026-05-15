@@ -6,13 +6,13 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.infrastructure.db.models.base import IS_SQLITE
 from app.infrastructure.db.models.notification import Notification
 from app.infrastructure.db.repositories.base import BaseRepository
 
 
 def _id(val):
-    return str(val) if IS_SQLITE else val
+    # Schema stores IDs as VARCHAR(36) on both backends; always coerce.
+    return str(val) if val is not None else None
 
 
 class NotificationRepository(BaseRepository[Notification]):

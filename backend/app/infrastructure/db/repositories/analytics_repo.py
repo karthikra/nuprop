@@ -8,12 +8,12 @@ from sqlalchemy import func, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.db.models.analytics_event import AnalyticsEvent
-from app.infrastructure.db.models.base import IS_SQLITE
 from app.infrastructure.db.models.visitor import Visitor
 
 
-def _id(val: UUID | str) -> str:
-    return str(val) if IS_SQLITE else val
+def _id(val: UUID | str | None) -> str | None:
+    # Schema stores IDs as VARCHAR(36) on both backends; always coerce.
+    return str(val) if val is not None else None
 
 
 def compute_fingerprint(ip: str, user_agent: str) -> str:

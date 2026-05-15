@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.infrastructure.db.database import async_session_factory
 from app.infrastructure.db.models.analytics_event import AnalyticsEvent
-from app.infrastructure.db.models.base import IS_SQLITE, _uuid_default
+from app.infrastructure.db.models.base import _uuid_default
 from app.infrastructure.db.models.proposal import Proposal
 from app.infrastructure.db.repositories.analytics_repo import AnalyticsRepository, compute_fingerprint
 from app.services.engagement_scorer import compute_visitor_score
@@ -43,7 +43,7 @@ async def ingest_analytics(request: Request):
             repo = AnalyticsRepository(db)
 
             # Verify proposal exists
-            pid = str(proposal_id) if IS_SQLITE else proposal_id
+            pid = str(proposal_id)
             result = await db.execute(select(Proposal).where(Proposal.id == pid))
             proposal = result.scalar_one_or_none()
             if not proposal:
@@ -57,7 +57,7 @@ async def ingest_analytics(request: Request):
             else:
                 visitor = await repo.get_visitor(proposal_id, fingerprint)
 
-            visitor_id = (str(visitor.id) if IS_SQLITE else visitor.id) if visitor else None
+            visitor_id = str(visitor.id) if visitor else None
 
             # Store events
             now = datetime.now(timezone.utc)
@@ -141,7 +141,7 @@ async def ingest_analytics(request: Request):
                             db.add(Notification(
                                 id=_uuid_default(),
                                 proposal_id=pid,
-                                agency_id=str(proposal.agency_id) if IS_SQLITE else proposal.agency_id,
+                                agency_id=str(proposal.agency_id),
                                 alert_type=n.alert_type,
                                 message=n.message,
                                 urgency=n.urgency,

@@ -12,19 +12,17 @@ from app.infrastructure.db.database import Base
 _settings = get_settings()
 _is_sqlite = _settings.DATABASE_URL.startswith("sqlite")
 
-# UUID column type: native PG_UUID on Postgres, String(36) on SQLite
-if _is_sqlite:
-    from sqlalchemy import String as _UUIDType
-    _uuid_col = String(36)
-else:
-    from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-    _uuid_col = PG_UUID(as_uuid=True)
+# UUID column type: String(36) on both Postgres and SQLite.
+# The Alembic initial migration created every ID/FK column as VARCHAR(36), so
+# the model must match. A previous attempt to use native PG_UUID on Postgres
+# silently produced a schema-vs-model type mismatch that crashed every query
+# against a real Postgres database (operator does not exist: varchar = uuid).
+_uuid_col = String(36)
 
 
 def _uuid_default():
-    """Generate a UUID that works on both SQLite (string) and PostgreSQL (native UUID)."""
-    val = uuid4()
-    return str(val) if _is_sqlite else val
+    """Generate a UUID as a string — schema is VARCHAR(36) on both backends."""
+    return str(uuid4())
 
 
 def uuid_pk():
