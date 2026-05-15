@@ -86,7 +86,8 @@ class BenchmarkAgent:
 
         settings = get_settings()
 
-        response = await self._client._client.messages.create(
+        # Use Claude's native web search — routed through the Bedrock facade.
+        response = await self._client.messages_create(
             model=settings.ANTHROPIC_DEFAULT_MODEL,
             max_tokens=4096,
             system=system,

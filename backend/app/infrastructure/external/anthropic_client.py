@@ -16,6 +16,7 @@ so this surface must stay stable for the test guard to keep working.
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from app.core.config import get_settings
 from app.services.llm import AIService, Tier, get_ai_service
@@ -94,6 +95,19 @@ class AnthropicClient:
             temperature=temperature,
         ):
             yield chunk
+
+    async def messages_create(self, **kwargs: Any) -> Any:
+        """Escape hatch for tool-use loops, vision payloads, prompt caching —
+        anything that needs the raw ``messages.create`` surface (e.g. the
+        web-search tool used by ResearchAgent / BenchmarkAgent). Delegates to
+        :class:`AIService`.
+
+        New code should prefer ``AIService.messages_create`` directly; this is
+        kept on the facade because the existing AI agents construct an
+        ``AnthropicClient`` instance and pre-Bedrock used to reach in via
+        ``self._client._client.messages.create(...)`` — that private attribute
+        path went away in the Bedrock migration."""
+        return await self._ai.messages_create(**kwargs)
 
     @property
     def is_configured(self) -> bool:
