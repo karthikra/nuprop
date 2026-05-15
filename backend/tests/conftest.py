@@ -103,9 +103,14 @@ def arq_pool():
         delattr(app.state, "arq_pool")
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def ws_publish_spy(monkeypatch):
-    """Stub events.publish so pipeline code never needs a real Redis in tests."""
+    """Stub events.publish so a test can assert WS emits without a real Redis.
+
+    Opt-in (not autouse) because making it autouse would break tests that
+    legitimately exercise the publish path against a mock ``redis`` client (e.g.
+    ``test_publish_pushes_a_json_envelope_to_the_channel``).
+    """
     published: list[tuple[str, dict]] = []
 
     async def _spy(redis, proposal_id, payload):  # noqa: ANN001
