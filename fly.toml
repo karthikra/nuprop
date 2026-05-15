@@ -1,51 +1,55 @@
-app = "nuprop"
-primary_region = "bom"
+# fly.toml app configuration file generated for nuprop on 2026-05-15T14:16:21+05:30
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'nuprop'
+primary_region = 'bom'
 
 [build]
 
 [deploy]
-  release_command = "cd /app/backend && alembic upgrade head"
+  # The Dockerfile's WORKDIR is /app/backend, so no `cd` is needed.
+  # Fly's release_command is exec-form (not shell), so a literal
+  # 'cd ... && alembic ...' would fail to spawn.
+  release_command = 'alembic upgrade head'
 
-# REDIS_URL must be set (Upstash Redis in production) for both the `app` and
-# `worker` processes — ARQ uses it to enqueue and drain pipeline jobs, and the
-# pub/sub channel relays WebSocket events from the worker to API replicas.
 [env]
-  ENVIRONMENT = "production"
-  DEBUG = "false"
-  PORT = "8080"
+  DEBUG = 'false'
+  ENVIRONMENT = 'production'
+  PORT = '8080'
 
-# Two long-running processes share the same image:
-#   app    — uvicorn (HTTP + WebSocket)
-#   worker — ARQ worker draining pipeline phase jobs from Redis
 [processes]
-  app = "uvicorn app.main:app --host 0.0.0.0 --port 8080"
-  worker = "arq app.workers.pipeline.WorkerSettings"
+  app = 'uvicorn app.main:app --host 0.0.0.0 --port 8080'
+  worker = 'arq app.workers.pipeline.WorkerSettings'
+
+[[mounts]]
+  source = 'nuprop_data'
+  destination = '/data'
+  initial_size = '1'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "suspend"
+  auto_stop_machines = 'suspend'
   auto_start_machines = true
   min_machines_running = 1
-  processes = ["app"]
+  processes = ['app']
 
   [http_service.concurrency]
-    type = "connections"
+    type = 'connections'
     hard_limit = 250
     soft_limit = 200
 
-[[http_service.checks]]
-  grace_period = "10s"
-  interval = "30s"
-  method = "GET"
-  path = "/api/v1/health"
-  timeout = "5s"
-
-[mounts]
-  source = "nuprop_data"
-  destination = "/data"
-  initial_size = "1"
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '10s'
+    method = 'GET'
+    path = '/api/v1/health'
 
 [[vm]]
-  size = "shared-cpu-2x"
-  memory = "1024mb"
+  size = 'shared-cpu-2x'
+  memory = '1gb'
+  cpus = 2
+  memory_mb = 1024
