@@ -11,7 +11,25 @@ function briefMessage(): ChatMessage {
   return {
     id: 'm1', proposal_id: 'prop-1', role: 'assistant', message_type: 'brief_summary',
     content: 'I have gathered the following details about this project.',
-    extra_data: { requires_approval: true, brief: { client: { name: 'Acme' } } },
+    extra_data: {
+      requires_approval: true,
+      brief: {
+        client: { name: 'Acme', industry: 'Beverage', size: 'Enterprise' },
+        project: {
+          type: 'Rebrand',
+          timeline: '8 weeks',
+          deliverables: [
+            { category: 'Logo', details: 'Primary mark + variants', quantity: 1 },
+            { category: 'Brand Guidelines', quantity: 1 },
+          ],
+        },
+        context: {
+          relationship: 'cold_pitch',
+          urgency: 'medium',
+          decision_maker: 'CMO',
+        },
+      },
+    },
     phase: 'brief', created_at: '2026-01-01T00:00:00Z',
   }
 }
@@ -29,10 +47,30 @@ function templateMessage(): ChatMessage {
 }
 
 describe('ApprovalGate', () => {
-  it('renders the brief summary with the structured brief JSON', () => {
+  it('renders the brief summary as a structured human-readable card', () => {
     render(<ApprovalGate message={briefMessage()} proposalId="prop-1" gateId="brief" />)
     expect(screen.getByText(/Brief Summary/i)).toBeInTheDocument()
-    expect(screen.getByText(/"name": "Acme"/)).toBeInTheDocument()
+
+    // Structural: the section labels are uppercased headers in the card.
+    expect(screen.getByText('Client')).toBeInTheDocument()
+    expect(screen.getByText('Project')).toBeInTheDocument()
+    expect(screen.getByText('Context')).toBeInTheDocument()
+    expect(screen.getByText('Deliverables')).toBeInTheDocument()
+
+    // Field labels (uppercase) only appear in the rendered card, not raw JSON.
+    expect(screen.getByText('Name')).toBeInTheDocument()
+    expect(screen.getByText('Industry')).toBeInTheDocument()
+    expect(screen.getByText('Timeline')).toBeInTheDocument()
+
+    // Prettified enum: raw JSON has "cold_pitch"; card has "Cold pitch".
+    expect(screen.getByText('Cold pitch')).toBeInTheDocument()
+
+    // Data values are reachable (each appears twice — rendered + raw JSON).
+    expect(screen.getAllByText('Acme').length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Primary mark/).length).toBeGreaterThan(0)
+
+    // Raw JSON details toggle still exposed for power users.
+    expect(screen.getByText(/Raw JSON/i)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /approve brief/i })).toBeInTheDocument()
   })
 
