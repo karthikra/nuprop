@@ -426,33 +426,63 @@ class ConnectorViewModel(ViewModelBase):
     # ── Slack ────────────────────────────────────────────────
 
     async def get_slack_auth_url(self, agency_id: UUID) -> str:
-        slack = SlackClient()
-        if not slack.is_configured:
+        from app.core.config import get_settings
+        from app.infrastructure.security.oauth_state import issue_state
+
+        if not self._slack.is_configured:
             self.error = "Slack OAuth not configured"
             self.status_code = 400
             return ""
-        return slack.get_auth_url(str(agency_id))
+        state = issue_state(
+            agency_id=agency_id,
+            provider="slack",
+            secret=get_settings().JWT_SECRET_KEY,
+        )
+        return self._slack.get_auth_url(state)
 
-    async def handle_slack_callback(self, agency_id: UUID, code: str) -> dict:
-        slack = SlackClient()
-        data = await slack.exchange_code(code)
+    async def handle_slack_callback(self, agency_id_from_state: UUID, code: str) -> dict:
+        """Caller (route handler) must have already verified the OAuth state
+        token and resolved the agency_id from its payload."""
+        try:
+            data = await self._slack.exchange_code(code)
+        except Exception:
+            logger.exception(
+                "slack.exchange_code failed",
+                extra={"event": "connector.slack.exchange_failed"},
+            )
+            return {}
 
         access_token = data.get("access_token", "")
         team = data.get("team", {})
         workspace_name = team.get("name", "")
+        if not access_token:
+            logger.warning(
+                "slack.exchange_code returned without access_token",
+                extra={"event": "connector.slack.missing_access_token"},
+            )
+            return {}
 
-        agency = await self.agency_repo.get_by_id(agency_id)
+        agency = await self.agency_repo.get_by_id(agency_id_from_state)
         if not agency:
+            return {}
+
+        try:
+            encrypted_access = self._encrypt(access_token)
+        except TokenVaultError:
+            logger.exception(
+                "token vault not configured during Slack callback",
+                extra={"event": "connector.slack.vault_not_configured"},
+            )
             return {}
 
         settings = dict(agency.settings or {})
         settings["slack"] = {
             "connected": True,
             "workspace": workspace_name,
-            "access_token": self._encrypt(access_token),
+            "access_token": encrypted_access,
             "last_sync": None,
         }
-        await self.agency_repo.update(agency_id, settings=settings)
+        await self.agency_repo.update(agency_id_from_state, settings=settings)
 
         return {"connected": True, "workspace": workspace_name}
 
@@ -461,10 +491,9 @@ class ConnectorViewModel(ViewModelBase):
         if not agency:
             return {"connected": False}
         slack_settings = (agency.settings or {}).get("slack", {})
-        slack = SlackClient()
         return {
             "connected": slack_settings.get("connected", False),
-            "configured": slack.is_configured,
+            "configured": self._slack.is_configured,
             "workspace": slack_settings.get("workspace"),
             "last_sync": slack_settings.get("last_sync"),
         }
@@ -488,7 +517,6 @@ class ConnectorViewModel(ViewModelBase):
             return {"error": "Slack not connected"}
 
         access_token = self._decrypt(slack_settings["access_token"])
-        slack = SlackClient()
         clients = await self.client_repo.search(agency_id, limit=500)
         mentions_found = 0
 
@@ -497,7 +525,7 @@ class ConnectorViewModel(ViewModelBase):
 
         for client in clients:
             try:
-                messages = await slack.search_messages(access_token, client.name, count=10)
+                messages = await self._slack.search_messages(access_token, client.name, count=10)
                 if not messages:
                     continue
 
