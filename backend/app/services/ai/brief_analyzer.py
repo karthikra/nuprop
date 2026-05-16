@@ -4,6 +4,7 @@ import json
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 
+from app.core.config import get_settings
 from app.infrastructure.external.anthropic_client import AnthropicClient
 
 SYSTEM_PROMPT = """You are NUPROP, an AI proposal copilot for design and professional services agencies.
@@ -74,11 +75,17 @@ class BriefAnalyzer:
         chat_history: list[dict],
         current_brief: dict,
     ) -> BriefAnalysisResult:
-        """Process chat history and return the AI's response + optional completed brief."""
+        """Process chat history and return the AI's response + optional completed brief.
+
+        Uses Haiku 4.5 (FAST tier) — conversational info extraction with a known
+        JSON schema doesn't need Sonnet/Opus quality, and Haiku is 3-5x faster
+        end-to-end, which matters for chat felt-latency.
+        """
         messages = self._build_messages(chat_history, current_brief)
         response_text = await self._client.complete(
             system=SYSTEM_PROMPT,
             messages=messages,
+            model=get_settings().ANTHROPIC_HAIKU_MODEL,
             max_tokens=2048,
             temperature=0.7,
         )
@@ -94,6 +101,7 @@ class BriefAnalyzer:
         async for chunk in self._client.stream(
             system=SYSTEM_PROMPT,
             messages=messages,
+            model=get_settings().ANTHROPIC_HAIKU_MODEL,
             max_tokens=2048,
             temperature=0.7,
         ):
