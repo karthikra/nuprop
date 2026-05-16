@@ -186,7 +186,45 @@ Deferred to keep the branch tightly scoped to the ideation feature:
 - **Drawer hydration O(n²)** — `useEffect` calls `addMessage` per message on every TanStack refetch; `addMessage` dedupes via `.some()`. For 200-message threads that's 40k comparisons per window-focus. Add a store action that does a single O(n) merge.
 - **Documentation:** the in-repo HANDOFF (this file) is current, but the spec's WS event catalogue should also list the `pipeline_error.phase` values now in use and confirm `message_updated` is channel-aware.
 
-### Option E — Production deploy 🟡 PARTIALLY STAGED (paused 2026-05-16)
+### Option E — Production deploy ✅ LIVE (2026-05-16)
+
+NUPROP is live at **https://nuprop.fly.dev** — health endpoint returns 200, login page renders.
+
+**Final stack:**
+- App + worker on Fly Mumbai (`bom`), image `nuprop:deployment-01KRRF07PX0M8TDXQEW6NDHPGS`. App: `shared-cpu-2x` 1GB, attached to `nuprop_data` volume. Worker: 1 active + 1 standby.
+- Postgres: **Neon free tier** in `us-east-1` (note: cross-region from `bom` → ~200ms per query; user opted to ship now and migrate region later via Neon's branching). DATABASE_URL uses `?ssl=require` (SQLAlchemy asyncpg dialect form), NOT the libpq `?sslmode=require` form.
+- Redis: **Upstash free tier** in regional plan. **REDIS_URL must use `rediss://` (TLS) — plain `redis://` causes Upstash to drop the connection server-side**. Worker and app both consume the same URL via redis-py; both rely on the `rediss://` scheme to auto-enable SSL.
+- LLM: AWS Bedrock `ap-northeast-1` via the `karthik` personal IAM user's keys (staged from local `~/.aws`).
+- All 6 secrets `Deployed` on Fly.
+
+**Deploy gotchas discovered today:**
+- **Upstash requires TLS.** First deploy used `redis://`; app crashed on every connect with `ConnectionError: Connection closed by server`. Worker's ARQ pool also failed silently. Fix: `rediss://` (two s's).
+- **Crash-looping machine holds its lease.** While the app was in a startup crash loop, `fly secrets set` couldn't acquire the machine's lease to apply new secrets. Had to kill the in-flight `fly deploy` first, then re-stage and re-deploy.
+- **Rolling updates can leave one machine on the old image.** Second deploy successfully rolled the worker(s) but failed to acquire the app machine's lease (still contested by the dead in-flight deploy). Third deploy with all leases free finally rolled all three machines to the new image.
+- **`fly secrets deploy` refuses if no machine is in a "deployed" state.** After cancelling a failed deploy, only `fly deploy` (not the cheaper `fly secrets deploy`) can apply new secrets.
+
+**Resume / iterate flow:**
+
+```bash
+# Every push from now on:
+git push origin main         # nothing automatic yet (Actions workflow disabled)
+fly deploy -a nuprop --remote-only
+
+# To enable auto-deploy on push:
+fly tokens create deploy     # outputs a token
+# Add it to GitHub repo secrets as FLY_API_TOKEN
+# Edit .github/workflows/deploy.yml — uncomment the `push:` block
+
+# To watch logs:
+fly logs -a nuprop
+
+# To restart without redeploy (e.g., to pick up new staged secrets):
+fly secrets deploy -a nuprop
+```
+
+---
+
+### Option E-LEGACY — Production deploy 🟡 PARTIALLY STAGED (paused 2026-05-16 — superseded by completion above)
 
 Started the deploy run. Got blocked on infra-provisioning decisions; stopped after staging the secrets I could set without third-party signups.
 
@@ -332,4 +370,4 @@ Unchanged structurally from the previous session. Ideation's Alembic migration u
 1. Read this file end-to-end (~3 min).
 2. `git log --oneline -5`, `git status` — confirm the latest `docs:` commit is HEAD and the two loose ends still pending.
 3. `~/.claude/projects/-Users-karthikramesh-Developer-nuprop/memory/session_handoff_2026_05_16.md` has the same pointer + a quick-verification block.
-4. Ask the user which queued item to pick — A (smoke test, ✅ done), B (loose-ends cleanup, ✅ done — Haiku switch in `0ef10dd`, duplicate workflow deleted), C (register-flow bug, ✅ fixed in `b363d6f`), D (reviewer follow-ups, ✅ all three done in `6a51d69` / `070b4e1` / `dbd081c`), E (production deploy — only remaining open item). Default: **E**. The codebase is in its cleanest state in weeks, working tree is clean, all tests green.
+4. Every queued item from this session is ✅ done — A (smoke test), B (loose ends), C (register-flow), D (reviewer follow-ups, ×3), E (production deploy). NUPROP is live at **https://nuprop.fly.dev**. Next session's open menu is the older PRD backlog (M16-M20: client context + connectors), or housekeeping (`.local` TLD note in CLAUDE.md, GitHub Actions auto-deploy wire-up, dedicated AWS IAM user for Bedrock).
