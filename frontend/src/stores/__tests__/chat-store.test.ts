@@ -144,3 +144,43 @@ describe('chat-store channel routing', () => {
     expect(useChatStore.getState().ideationMessages).toEqual([])
   })
 })
+
+describe('chat-store mergeIdeationMessages', () => {
+  beforeEach(() => useChatStore.getState().reset())
+
+  function ideationMsg(id: string, overrides: Partial<ChatMessage> = {}): ChatMessage {
+    return msg(id, { channel: 'ideation', ...overrides })
+  }
+
+  it('adds all messages on an empty slice and preserves order', () => {
+    const batch = [ideationMsg('i1'), ideationMsg('i2'), ideationMsg('i3')]
+    useChatStore.getState().mergeIdeationMessages(batch)
+    expect(useChatStore.getState().ideationMessages.map((m) => m.id)).toEqual(['i1', 'i2', 'i3'])
+  })
+
+  it('dedupes against existing ids — only the new messages are appended', () => {
+    useChatStore.getState().mergeIdeationMessages([ideationMsg('i1'), ideationMsg('i2')])
+    useChatStore.getState().mergeIdeationMessages([
+      ideationMsg('i1'), // already there
+      ideationMsg('i2'), // already there
+      ideationMsg('i3'), // new
+    ])
+    expect(useChatStore.getState().ideationMessages.map((m) => m.id)).toEqual(['i1', 'i2', 'i3'])
+  })
+
+  it('is a no-op when called with an empty array (no state churn)', () => {
+    useChatStore.getState().mergeIdeationMessages([ideationMsg('i1')])
+    const before = useChatStore.getState().ideationMessages
+    useChatStore.getState().mergeIdeationMessages([])
+    expect(useChatStore.getState().ideationMessages).toBe(before)
+  })
+
+  it('does not touch the main channel even with channel=main inputs', () => {
+    useChatStore.getState().mergeIdeationMessages([
+      msg('x1', { channel: 'main' }),
+      ideationMsg('i1'),
+    ])
+    expect(useChatStore.getState().messages).toEqual([])
+    expect(useChatStore.getState().ideationMessages.map((m) => m.id)).toEqual(['x1', 'i1'])
+  })
+})

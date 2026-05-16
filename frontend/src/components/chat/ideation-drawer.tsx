@@ -18,15 +18,15 @@ const SUGGESTIONS = [
 
 export function IdeationDrawer({ open, onClose, proposalId }: Props) {
   // Hydrate the store from the server on first open of this proposal.
+  // Uses mergeIdeationMessages so a TanStack refetch is O(n) total, not O(n²).
   const { data: serverMsgs } = useIdeationMessages(proposalId)
   const addMessage = useChatStore((s) => s.addMessage)
+  const mergeIdeationMessages = useChatStore((s) => s.mergeIdeationMessages)
   useEffect(() => {
     if (serverMsgs) {
-      for (const m of serverMsgs) {
-        addMessage({ ...m, channel: 'ideation' })
-      }
+      mergeIdeationMessages(serverMsgs.map((m) => ({ ...m, channel: 'ideation' })))
     }
-  }, [serverMsgs, addMessage])
+  }, [serverMsgs, mergeIdeationMessages])
 
   const messages = useChatStore((s) => s.ideationMessages)
   const send = useSendIdeationMessage()

@@ -13,6 +13,7 @@ interface ChatState {
   setMessages: (msgs: ChatMessage[]) => void
   addMessage: (msg: ChatMessage) => void
   updateMessage: (msg: ChatMessage) => void
+  mergeIdeationMessages: (msgs: ChatMessage[]) => void
   setPipelinePhase: (phase: string) => void
   setConnected: (connected: boolean) => void
   setSending: (sending: boolean) => void
@@ -49,6 +50,19 @@ export const useChatStore = create<ChatState>((set) => ({
       const next = [...arr]
       next[idx] = msg
       return { [target]: next } as Partial<ChatState>
+    }),
+
+  // Merge a batch of server-fetched ideation messages into the slice in a single
+  // O(n) pass — used by IdeationDrawer's hydration on every TanStack refetch.
+  // Avoids the O(n²) cost of calling addMessage per message (which does its own
+  // .some() scan each time).
+  mergeIdeationMessages: (msgs) =>
+    set((state) => {
+      if (!msgs.length) return {}
+      const existing = new Set(state.ideationMessages.map((m) => m.id))
+      const toAdd = msgs.filter((m) => !existing.has(m.id))
+      if (!toAdd.length) return {}
+      return { ideationMessages: [...state.ideationMessages, ...toAdd] }
     }),
 
   setPipelinePhase: (phase) => set({ pipelinePhase: phase }),
