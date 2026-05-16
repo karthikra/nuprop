@@ -20,6 +20,7 @@ class ChatMessageResponse(BaseModel):
     content: str
     extra_data: dict
     phase: str | None = None
+    channel: str = "main"
     created_at: datetime
 
 
