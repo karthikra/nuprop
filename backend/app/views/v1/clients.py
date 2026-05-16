@@ -6,9 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_agency_id
+from app.core.deps import get_context_service, get_current_agency_id
 from app.domain.schemas.client_schemas import ClientCreate, ClientResponse, ClientUpdate
 from app.infrastructure.db.database import get_db
+from app.services.context_service import ContextService
 from app.viewmodels.client_viewmodel import ClientViewModel
 
 router = APIRouter(prefix="/clients", tags=["clients"])
@@ -85,21 +86,19 @@ async def add_context(
     body: ContextInput,
     agency_id: UUID = Depends(get_current_agency_id),
     vm: ClientViewModel = Depends(get_vm),
+    ctx: ContextService = Depends(get_context_service),
 ):
     """Parse pasted text into structured context and merge into client profile."""
     client = await vm.get_client(client_id, agency_id)
     if not client:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
 
-    from app.services.context_service import ContextService
-    svc = ContextService()
-
     # Extract structured context from pasted text
-    extraction = await svc.extract_context(body.raw_text)
+    extraction = await ctx.extract_context(body.raw_text)
 
     # Merge with existing context profile
     existing = client.context_profile or {}
-    merged = await svc.merge_context(existing, extraction)
+    merged = await ctx.merge_context(existing, extraction)
 
     # Save to client
     updated = await vm.update_client(client_id, agency_id, ClientUpdate(context_profile=merged))  # type: ignore
@@ -114,6 +113,7 @@ async def get_context_brief(
     include_emails: bool = False,
     agency_id: UUID = Depends(get_current_agency_id),
     vm: ClientViewModel = Depends(get_vm),
+    ctx: ContextService = Depends(get_context_service),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate a natural-language Context Brief. Optionally enriches with email data."""
@@ -122,9 +122,6 @@ async def get_context_brief(
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
 
     context_profile = client.context_profile or {}
-
-    from app.services.context_service import ContextService
-    svc = ContextService()
 
     email_count = 0
     if include_emails and client.contacts:
@@ -144,14 +141,18 @@ async def get_context_brief(
                         {"summary": e.summary, "message_type": e.message_type, "sentiment": e.sentiment, "subject": e.subject, "date": str(e.date)}
                         for e in emails
                     ]
-                    context_profile = await svc.enrich_context_with_emails(context_profile, email_dicts)
+                    context_profile = await ctx.enrich_context_with_emails(context_profile, email_dicts)
         except Exception:
-            pass  # Don't let email enrichment failures block the brief
+            import logging
+            logging.getLogger(__name__).exception(
+                "email enrichment for context brief failed; continuing without emails",
+                extra={"event": "context.brief.email_enrichment_failed"},
+            )
 
     if not context_profile:
         return {"brief": "", "has_context": False, "email_count": email_count}
 
-    brief = await svc.generate_context_brief(client.name, context_profile)
+    brief = await ctx.generate_context_brief(client.name, context_profile)
     return {"brief": brief, "has_context": True, "email_count": email_count}
 
 
