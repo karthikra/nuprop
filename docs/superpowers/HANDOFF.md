@@ -192,14 +192,45 @@ cd frontend && pnpm build
 | Slice | Estimate | What ships |
 |---|---|---|
 | ~~S0~~ — Truth baseline | ~~0.25d~~ ✅ done 2026-05-16 | This handoff rewrite + audit doc + memory |
-| **S1** — Backend CRITICAL fixes | 1d | Fail-loud encryption, OAuth CSRF, module-level logging, DI for services, narrowed excepts |
+| ~~S1~~ — Backend CRITICAL fixes | ~~1d~~ ✅ done 2026-05-16 | Fail-loud encryption + signed OAuth state (HMAC + Redis nonce dedup) + DI for ContextService/TokenVault/NonceStore + per-domain Gmail-sync commits with watermarks + module-level loggers across all 8 M16-M20 backend files. 45 new pytest cases, all green. |
 | **S2** — Manual context UI on Client page | 1d | M16 shippable end-to-end |
 | **S3** — Connector frontend + Slack callback + tests | 1.5d | M17-M19 frontend parity |
 | **S4** — Production OAuth wiring | 0.5d | Google + Slack OAuth apps registered, secrets set, smoke-tested |
 | **S5** — Pipeline integration | 1.5d | Wire context_brief into 5 unwired phases; `build_cost_model` consumes `proposal.preferences`; ideation gets relationship context; email auto-enrichment post-sync |
 | **S6** — Backend HIGH/MEDIUM polish + retry/backoff | 1d | Defer-able |
 
-Each slice gets its own spec in `docs/superpowers/specs/`, its own worktree, and a user-approval checkpoint at the end. **Active slice: S1** (in worktree `m16-m20-s1-backend-hardening`).
+Each slice gets its own spec in `docs/superpowers/specs/`, its own worktree, and a user-approval checkpoint at the end. **Active slice: S2** (will open worktree `m16-m20-s2-context-ui`).
+
+#### S1 — what landed (commits on `worktree-m16-m20-s1-backend-hardening`, ready to merge to `main`)
+
+```
+c54b43c refactor(S1): add module logger to email_index_repo
+0c3e9e5 refactor(S1): module loggers on context_service + context_intelligence
+832861c refactor(S1): module loggers on slack/drive/calendar clients; narrow drive export except
+b8bf91e refactor(S1): gmail_client — module logger + narrowed excepts
+3293a04 feat(S1): inject ContextService via Depends() in clients routes
+956e039 feat(S1): connector route handlers verify OAuth state (Gmail + Slack)
+8ba4bdc fix(S1): sync_emails empty-messages watermark + final commit + last_sync semantic (review C1/C2/I3)
+2209685 feat(S1): per-domain commits and watermarks in Gmail sync
+60ec2eb refactor(S1): narrow excepts in connector sync paths, add structured logging
+2aab02a feat(S1): Slack OAuth — issue signed state, verify in callback, validate response
+d3129960 feat(S1): Gmail OAuth — issue signed state, verify in callback, validate response
+48a9fd9 refactor(S1): ConnectorViewModel uses TokenVault + accepts injected clients
+00641c9 feat(S1): EmailIndexRepository.upsert_many — chunked commits
+b063833 feat(S1): fail-loud startup if connectors enabled without ENCRYPTION_KEY
+0ea8070 feat(S1): DI providers — get_token_vault, get_context_service, get_nonce_store
+26d4c86 fix(S1): harden oauth_state against malformed payloads (review C1/C2/I1)
+eb4ccd7 feat(S1): OAuth state — HMAC-signed, time-limited, single-use via NonceStore
+bce3fd8 feat(S1): TokenVault with fail-loud encrypt/decrypt and InvalidToken handling
+47c46c0 feat(S1): scaffold infrastructure/security package
+80d7dd6 feat(S1): add structured error hierarchy for M16-M20 hardening
+1ad5807 plan(S1): implementation plan for M16-M20 backend hardening
+4aa10f8 spec(S1): M16-M20 backend hardening design
+```
+
+22 commits, 1 day of work. Two-stage subagent review (spec compliance + code quality on Sonnet for security-critical tasks) caught 5 bugs that surface-level spec review missed — most notably the OAuth-state nonce-burning issue on bad agency_id (`UUID(payload["agency_id"])` ran AFTER `mark_seen`, so a parse failure would brick retry within the TTL window).
+
+**To merge:** `git merge --ff-only worktree-m16-m20-s1-backend-hardening` from main, then `git push origin main`. Auto-deploy will pick it up. Since all behavior is gated on connector secrets being present (which they aren't yet in prod), this is safe to ship immediately.
 
 ### Option C — Production hardening
 
