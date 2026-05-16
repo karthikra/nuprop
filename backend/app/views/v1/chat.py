@@ -55,6 +55,43 @@ async def send_message(
     return [ChatMessageResponse.model_validate(m) for m in result]
 
 
+@router.get(
+    "/{proposal_id}/ideation/messages",
+    response_model=list[ChatMessageResponse],
+)
+async def get_ideation_messages(
+    proposal_id: UUID,
+    skip: int = 0,
+    limit: int = 200,
+    agency_id: UUID = Depends(get_current_agency_id),
+    vm: ChatViewModel = Depends(get_vm),
+):
+    messages = await vm.get_ideation_messages(proposal_id, agency_id, skip, limit)
+    if messages is None:
+        raise HTTPException(status_code=vm.status_code, detail=vm.error)
+    return messages
+
+
+@router.post(
+    "/{proposal_id}/ideation/send",
+    response_model=list[ChatMessageResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_ideation_message(
+    proposal_id: UUID,
+    body: SendMessageRequest,
+    agency_id: UUID = Depends(get_current_agency_id),
+    vm: ChatViewModel = Depends(get_vm),
+):
+    """Persist the user message on the ideation channel and enqueue the
+    run_ideation worker job. Returns just the user message — the assistant
+    reply arrives via WebSocket."""
+    result = await vm.send_ideation_message(proposal_id, agency_id, body.content)
+    if result is None:
+        raise HTTPException(status_code=vm.status_code, detail=vm.error)
+    return result
+
+
 class ApproveGateRequest(BaseModel):
     data: dict = {}
 

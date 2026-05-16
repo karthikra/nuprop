@@ -95,7 +95,7 @@ class ChatViewModel(ViewModelBase):
             self.status_code = 404
             return None
         return await self.msg_repo.list_by_proposal(
-            proposal_id, skip, limit, channel="ideation",
+            proposal_id, skip=skip, limit=limit, channel="ideation",
         )
 
     async def send_message(
