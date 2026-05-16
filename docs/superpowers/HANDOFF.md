@@ -167,7 +167,17 @@ Originally flagged as two bugs after the smoke test. On follow-up inspection onl
 
 Bonus context still valid: `@test.local` is rejected by the email validator (`The part after the @-sign is a special-use or reserved name`). Use `.com` / `.test` / `.example` for test accounts. Not a bug, just a footgun.
 
-### Option D — Follow-ups flagged by reviewers during this session
+### Option D — Reviewer follow-ups ✅ ALL THREE COMPLETED (2026-05-16)
+
+All three landed in the following commits, each with its own dedicated review-driven scope:
+
+1. **`6a51d69 test: consolidate _make_proposal helpers into shared fixtures`** — added `make_proposal_db` (returns `(agency, client, proposal)`) and `make_proposal_api` (returns proposal dict) factories in `conftest.py`. Removed 10 local `_make_proposal` helpers + the `_client_proposal_via_api` helper from `test_ideation_api.py`. 244 tests still pass.
+2. **`070b4e1 perf(ui): O(n) ideation hydration via mergeIdeationMessages store action`** — new `mergeIdeationMessages(msgs)` store action does a Set-based dedup in a single pass. `IdeationDrawer`'s hydration `useEffect` now calls it instead of looping `addMessage`. 4 new vitest cases. Frontend goes from 120 → 124 passing.
+3. **`dbd081c feat(ui): channel-aware typing indicator for the ideation drawer`** — backend reinstates the typing broadcast in `send_ideation_message` with `channel: "ideation"` on the payload. Frontend store gains `isIdeationTyping: boolean` + `setIdeationTyping`. WS hook routes `typing` events by `data.channel` (defaulting to main when omitted, back-compat). `new_message` on the ideation channel clears `isIdeationTyping`, not `isTyping`. Drawer renders `<TypingIndicator />` inside the message area when `isIdeationTyping` is true. 7 new vitest cases lock the channel routing + no-leak invariant. Frontend goes from 124 → 131 passing.
+
+After these landed: backend 244, frontend 131, tsc clean, vite build clean. Pushed in one batch: `0ef10dd..dbd081c main -> main`.
+
+### Option D-LEGACY (kept for context) — Follow-ups flagged by reviewers during the ideation build
 
 Deferred to keep the branch tightly scoped to the ideation feature:
 
@@ -278,4 +288,4 @@ Unchanged structurally from the previous session. Ideation's Alembic migration u
 1. Read this file end-to-end (~3 min).
 2. `git log --oneline -5`, `git status` — confirm the latest `docs:` commit is HEAD and the two loose ends still pending.
 3. `~/.claude/projects/-Users-karthikramesh-Developer-nuprop/memory/session_handoff_2026_05_16.md` has the same pointer + a quick-verification block.
-4. Ask the user which queued item to pick — A (smoke test, ✅ done — only re-run if Bedrock or migration semantics change), B (loose-ends cleanup), C (register-flow bug, ✅ fixed in `b363d6f`), D (review follow-ups), E (production deploy). Default if they want momentum: **B** (loose-ends) or **D** (reviewer follow-ups).
+4. Ask the user which queued item to pick — A (smoke test, ✅ done), B (loose-ends cleanup: only `.github/workflows/fly-deploy.yml` left to triage — the Haiku switch was committed in `0ef10dd`), C (register-flow bug, ✅ fixed in `b363d6f`), D (reviewer follow-ups, ✅ all three done in `6a51d69` / `070b4e1` / `dbd081c`), E (production deploy). Default if they want momentum: **E** (deploy) — the codebase is in its cleanest state in weeks.
