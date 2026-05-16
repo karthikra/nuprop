@@ -1,28 +1,27 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-15 (end of working session)
-**Latest commit on `main`:** `51af281` (pushed to `origin/main`)
-**Working tree:** clean. Branch: `main`. No worktrees.
+**Last updated:** 2026-05-16 (end of working session)
+**Latest commit on `main`:** `91bb135` (pushed to `origin/main`)
+**Working tree:** modified — see "Loose ends" below. Branch: `main`. No active worktrees.
 
-> Quick orientation: this doc gets you from a `/clear` to "ready to keep working" in under two minutes. The current state, the two queued workstreams, the gotchas, and the exact next decisions are all below.
+> Quick orientation: this doc gets you from a `/clear` to "ready to keep working" in under two minutes. The current state, the one queued workstream, the gotchas, and the exact next decisions are all below.
 
 ---
 
 ## TL;DR
 
-NUPROP is a multi-tenant AI proposal copilot. Today (a single working session) shipped two major refactors and one feature build, all on `main`:
+NUPROP is a multi-tenant AI proposal copilot. Today's session executed the **Ideation side-channel** — a read-only Claude side-channel attached to each proposal, accessible via a drawer in the proposal page. 17-task plan from the 2026-05-15 session, executed via `superpowers:subagent-driven-development` (one implementer subagent per task + per-task spec & quality reviewers + a final cross-cutting reviewer). 16 of 17 tasks done; the remaining one is a manual docker smoke test.
 
-1. ✅ **Background-worker pipeline** — moved the proposal pipeline (research → cost model → narrative → outputs) off the HTTP request thread onto an ARQ worker so each phase commits before broadcasting. Fixed the read-your-writes bug.
-2. ✅ **Bedrock migration** — every Claude call now routes through `AsyncAnthropicBedrock` per the project's CLAUDE.md policy. Sonnet 4.6 default, Opus 4.7 for research, Haiku 4.5 for fast chat/plans.
-3. ✅ **Research transparency** — pre-flight plan + live activity log + annotated findings (with hover-citation superscripts) for `run_research` and `run_benchmarks`.
-
-**Plus a fourth feature was fully designed but NOT executed:** the **Ideation side-channel** — spec + 17-task plan written and approved, queued for execution.
+What landed:
+- Backend: new `chat_messages.channel` column + Alembic migration; `ChatMessageRepository` channel filter; `ChatMessageResponse.channel`; new `IdeationService.run_ideation` worker phase (Sonnet 4.6 with `cache_control: ephemeral` on the proposal-context system block); ARQ task wrapper with **isolated failure handling** (does NOT touch `pipeline_state` on error — writes a `system/error` chat row to the ideation channel + emits `pipeline_error` WS event); ViewModel + 2 new API routes under `/chat/{id}/ideation/*`.
+- Frontend: `ChatMessage` type carries `channel`; chat store routes incoming WS messages into separate `messages` / `ideationMessages` slices (both `addMessage` AND `updateMessage` are channel-aware); two TanStack hooks (`useIdeationMessages`, `useSendIdeationMessage`); `<IdeationDrawer />` (slides from right, 40vw/max-560px desktop, full-screen mobile, empty-state with 4 clickable suggestions, inline amber error block, `aria-modal="true"` + `role="alert"`); `<IdeateButton />` with URL hash sync (`#ideate`); mounted on the proposal page header.
+- Plus the cross-cutting fix commit `91bb135` (worker error path now also publishes `new_message` so the drawer renders the error in real time; `send_ideation_message` no longer broadcasts `typing` since `isTyping` is a single shared flag and was leaking into the main chat; Alembic migration now uses `op.get_context().autocommit_block()` + `postgresql_concurrently=True` for safe prod deploy on the hot `chat_messages` table; WS hook gains `pipeline_error` handler + the TS type union).
 
 **Outstanding immediate work for the next session:**
 
-- **Decide:** execute the queued ideation plan, or do a live smoke test of the research-transparency build first.
-- **Stretch:** clean up minor lint items (unused imports, inline-import placements flagged by code review) and the stale `ANTHROPIC_API_KEY=…` line in `.env.docker`.
-- **Production:** `fly.toml` still needs AWS secrets set via `fly secrets set` before a real deploy can complete (see "Deployment" below).
+- **Task 17 — live docker smoke test.** Not blocking — feature is merged to main and pushed. Manual UI verification: `docker compose up --build -d`, register, create proposal, click the Ideate button in the header, drive a thread. Plan's Task 17 has the explicit checklist.
+- **Loose ends on main's working tree** (untouched throughout this session, both from a prior session): uncommitted `backend/app/services/ai/brief_analyzer.py` (Haiku-tier switch — 10-line change) and untracked `.github/workflows/fly-deploy.yml` (18 lines, looks like an early CI deploy attempt). Decide commit / revert / amend.
+- **Production:** `fly.toml` still needs AWS secrets set via `fly secrets set` before a real deploy can complete (see "Deployment" below). Unchanged from the previous session.
 
 ---
 
@@ -45,33 +44,33 @@ NUPROP is a multi-tenant AI proposal copilot. Today (a single working session) s
 ## Repo state at handoff
 
 ```text
-origin/main = 51af281 = local main = clean working tree
+origin/main = 91bb135 = local main
+Working tree: modified
+  M backend/app/services/ai/brief_analyzer.py     (Haiku-tier switch — uncommitted)
+  ?? .github/workflows/fly-deploy.yml             (untracked, 18 lines)
 ```
 
-Recent history (newest first, all today):
+Recent history (newest first — top 16 are this session's merge):
 
 ```
+91bb135 fix: ideation real-time error delivery, typing isolation, migration safety
+5b82c89 feat(ui): mount IdeateButton and IdeationDrawer on the proposal page
+58b8638 feat(ui): IdeateButton with URL hash sync
+e3b2c16 feat(ui): IdeationDrawer with empty state, message list, send, and error rendering
+fdcb491 feat(api): useIdeationMessages and useSendIdeationMessage hooks
+aba6670 feat(store): route incoming chat messages by channel into separate slices
+3489500 feat(types): ChatMessage carries the channel field
+34795d8 feat: GET /chat/{id}/ideation/messages and POST /chat/{id}/ideation/send
+f32c087 feat: ChatViewModel.get_ideation_messages and send_ideation_message
+4a488d5 feat: run_ideation worker task with isolated failure handling
+758ef06 test: IdeationService propagates Bedrock errors instead of swallowing
+e235451 feat: IdeationService.run_ideation — Sonnet 4.6 + cache_control + ideation-channel commit
+47e9542 feat: _build_ideation_system_prompt — read-only proposal context for the side-channel
+403643a feat: ChatMessageResponse exposes the channel field
+ff8cb78 feat: ChatMessageRepository.list_by_proposal filters by channel
+62ed9d9 feat: add chat_messages.channel column for ideation side-channel
+97472da docs: session handoff for resume after /clear     (← session boundary)
 51af281 feat(ui): route new research / benchmarks message types in MessageBubble
-5f8a0b7 feat(ui): ResearchFindingsCard — annotated findings with hover citation superscripts
-e2f8e3c feat(ui): CitationPopover — dumb popover with title, domain, snippet, source link
-7475f7f feat(ui): ResearchActivityLog — live timeline with collapse-on-complete
-0e6cc59 feat(ui): ResearchPlanCard — renders pre-flight plan for research and benchmarks
-82ec667 feat(store): updateMessage action + WS message_updated routing
-86436f6 test: migrate / retire tests that monkeypatched old ResearchAgent/BenchmarkAgent paths
-13f38d7 feat: run_benchmarks emits separate plan/activity/findings (Sonnet 4.6 streaming)
-27c77e0 fix: run_research formats RESEARCH_SYSTEM template before sending to Bedrock
-5b8cbb9 feat: run_research emits plan + activity log + annotated findings (Opus 4.7 streaming)
-d7de977 fix: process_stream — compute span offsets from cited_text, handle results at content_block_stop
-3e374b6 feat: process_stream — SDK stream → ActivityEvents + body + citation graph
-7642613 feat: ActivityFlusher — batched-flush primitive for live activity logs
-4a50588 feat: Haiku-based research_planner — research + benchmarks plan generation
-1ec3b95 feat(events): publish_message_updated helper for live message updates
-1975019 docs: implementation plan for research transparency feature
-10b1959 docs: spec for research transparency — plan, live activity, annotated findings
-ff75d26 fix: restore web-search tool-use after Bedrock migration
-8f694e7 docs: implementation plan for ideation side-channel
-dc8a55f docs: spec for ideation side-channel feature
-98ca061 feat: route Claude inference through AWS Bedrock (CLAUDE.md compliance)
 …
 ```
 
@@ -79,137 +78,100 @@ dc8a55f docs: spec for ideation side-channel feature
 
 ```bash
 cd backend && .venv/bin/python -m pytest -q
-# → 224 passed, 0 skipped
+# → 244 passed, 0 skipped  (was 224 pre-ideation; +20 new tests)
 
 cd frontend && pnpm test --run
-# → 101 passed across 21 files
+# → 115 passed across 24 files  (was 101 pre-ideation; +14)
 
 cd frontend && pnpm build
 # → clean
+
+.venv/bin/python -c "from app.main import app; print(len(app.routes))"
+# → 64   (was 62; +2 ideation routes)
 ```
 
 ---
 
-## What got done today, in order
+## What got done today (in execution order)
 
-### 1. Background-worker pipeline (20 tasks, all executed inline)
+The whole session was a single skill invocation: `superpowers:subagent-driven-development` against the previously-written 17-task plan. Worktree created via `EnterWorktree`, all 16 code tasks executed in there, then fast-forward merged to main and `ExitWorktree(action: remove)` for cleanup.
 
-Goal: move the multi-phase proposal pipeline off the HTTP request thread onto ARQ background jobs so each phase commits its DB writes before it broadcasts — fixing the read-your-writes bug. Spec at `docs/superpowers/specs/2026-05-15-background-worker-pipeline-design.md`, plan at `docs/superpowers/plans/2026-05-15-background-worker-pipeline.md`.
+### Per-task lifecycle (each task)
 
-Shipped:
-- ARQ worker process (`app/workers/pipeline.py`) running six phase functions.
-- New `PipelineService` (`app/services/pipeline_service.py`) — each phase commits before broadcasting, ~570 lines extracted from `ChatViewModel`.
-- Redis pub/sub bridge (`app/infrastructure/queue/events.py`) — worker emits go to `nuprop:ws` channel; API process's `ws_event_subscriber` (started in lifespan) relays to local `ws_manager`.
-- `ChatViewModel` slimmed 832 → 263 lines; now just validates, persists user msg, enqueues the first phase, returns immediately.
-- `POST /chat/{id}/retry` endpoint for failed phases.
-- Docker-compose + fly.toml updated for the worker process.
+1. Mark in_progress in TaskCreate.
+2. Dispatch implementer subagent (Haiku for mechanical, Sonnet for integration). Full task text + scene-setting inlined into the prompt; subagent does NOT read the plan file.
+3. Dispatch spec-compliance reviewer (Haiku) with the same task text. Verifies by reading code, not by trusting the implementer.
+4. If spec issues: re-dispatch implementer with the specific gaps, then re-review.
+5. Dispatch code-quality reviewer (Sonnet for non-trivial changes, Haiku for ≤2-file additions). 5-axis review + the focus areas the controller flagged in the prompt.
+6. If quality issues: re-dispatch implementer with the specific fixes (`git commit --amend --no-edit` for atomic per-task commits).
+7. Mark completed.
 
-Live smoke test exposed several pre-existing bugs (see "Smoke test discoveries" below). All fixed before move-on.
+### Cross-cutting final review
 
-### 2. Bedrock migration (one big commit `98ca061`)
+After all 16 tasks landed, dispatched a final cross-cutting reviewer (Sonnet) over the full branch diff. It caught two Critical bugs the per-task reviewers missed because they were only visible at the full-stack level:
 
-The codebase was hitting `api.anthropic.com` directly with `ANTHROPIC_API_KEY`, violating CLAUDE.md's "always route through AWS Bedrock" rule. Migrated every AI call:
+1. **Error path didn't publish `new_message`** — the worker wrote a `system/error` row and committed it, but only published `pipeline_error`. The frontend had no `pipeline_error` handler for the ideation channel, so an open drawer never saw the error in real time. **Fix:** the worker now publishes BOTH events (the `new_message` for the row, then the `pipeline_error` for observability).
+2. **`isTyping` cross-contamination** — `send_ideation_message` broadcast `{type: "typing", typing: true}`, but `isTyping` is a single shared scalar in the frontend store. Sending an ideation message lit up "AI is thinking..." in the MAIN chat panel. **Fix:** removed the typing broadcast entirely from ideation. The drawer's `useSendIdeationMessage` mutation's `isPending` state disables the Send button, providing optimistic feedback. A channel-aware typing indicator is a follow-up.
 
-- New `app/services/llm.py` — canonical `AIService` per MVVM. Wraps `AsyncAnthropicBedrock`. Three tiers (`FAST`/`BALANCED`/`HEAVY`), Opus 4.7-aware kwargs builder (strips `temperature`/`top_p`/`top_k`).
-- Rewrote `app/infrastructure/external/anthropic_client.py` as a facade over `AIService` (preserves existing agents' surface).
-- Dropped `ANTHROPIC_API_KEY` from config; added `AWS_REGION` (default `ap-northeast-1`) and optional `AWS_PROFILE`.
-- Model IDs updated to verified Bedrock global inference profile IDs:
-  - Default (Sonnet 4.6): `global.anthropic.claude-sonnet-4-6`
-  - Opus 4.7: `global.anthropic.claude-opus-4-7`
-  - Haiku 4.5: `global.anthropic.claude-haiku-4-5-20251001-v1:0`
-- `docker-compose.yml`: dropped `ANTHROPIC_API_KEY` env, added `AWS_REGION` + read-only `~/.aws` mount into both `app` and `worker`.
+Plus two Important fixes:
+- `op.get_context().autocommit_block()` + `postgresql_concurrently=True` on the `chat_messages` index (prod safety on a hot table).
+- WS hook test gained an end-to-end channel-routing test.
 
-Three documentation discrepancies surfaced (and were fixed in source-of-truth files):
-- **`AsyncAnthropicBedrockMantle` doesn't exist** — both `~/.claude/CLAUDE.md` and the `anthropic-pipeline` skill referenced this nonexistent class. Real SDK exports `AsyncAnthropicBedrock` (no "Mantle"). Both docs corrected.
-- **Sonnet 4.6 model ID had wrong `-v1` suffix** in the skill — actual is `global.anthropic.claude-sonnet-4-6`.
-- **Haiku 4.5 model ID** in the skill was the on-demand foundation-model ID, not the global inference profile (`global.anthropic.claude-haiku-4-5-20251001-v1:0`).
+And one Suggestion: `pipeline_error` added to the TS `WSMessage.type` union + a no-op `console.warn` handler in `use-websocket.ts` for observability.
 
-### 3. Two bug fixes after live smoke testing (`ff75d26`, `15dfeef`)
+All five rolled into commit `91bb135`.
 
-**`ff75d26` — Web-search tool-use after Bedrock migration:** `ResearchAgent` and `BenchmarkAgent` reached into `self._client._client.messages.create(...)` for native web search. The Bedrock migration renamed the facade's internal client `_client` → `_ai`, so both agents crashed with `AttributeError: 'AnthropicClient' object has no attribute '_client'`. Added a public `AnthropicClient.messages_create(**kwargs)` method that proxies to `AIService.messages_create`, and updated both agents to use the public surface. Plus a `test_anthropic_facade.py` that locks in the facade's public methods so any future rename fails fast.
+### Operational recovery worth remembering
 
-**`15dfeef` — Per-turn unique job IDs for analyze_brief:** ARQ uses `_job_id` as an idempotency key — once a result is stored for a job_id, subsequent enqueues with the same id are silently dropped for 24h. That's correct for one-shot gate approvals but broke multi-turn brief intake (every follow-up message was silently swallowed). Fix: `analyze_brief` now uses `{proposal_id}:analyze_brief:{user_msg.id}` as the job_id; gate approvals still use the bare `{proposal_id}:{phase}` form. `/retry` appends `uuid4()` so failed-phase retries actually re-run.
+Task 12 (frontend API hooks) — the implementer subagent ran `cd /Users/karthikramesh/Developer/nuprop/frontend` (the MAIN checkout's frontend, not the worktree's), then wrote files and committed there. The commit `61f619b` landed on `main` instead of on the worktree branch. Caught by the implementer's report: test count went from 104 to 103 instead of 106 (running against main's frontend, which lacked Tasks 10/11). Recovery:
 
-### 4. Research transparency (15 tasks, all executed via subagent-driven flow)
+1. `git cherry-pick 61f619b` from inside the worktree → applied cleanly (the commit only touched 2 files that the worktree branch hadn't yet modified).
+2. `git stash push -- backend/app/services/ai/brief_analyzer.py` on main → `git reset --hard 97472da` → `git stash pop`. The brief_analyzer mod survived, the bad commit disappeared from main.
+3. Confirmed `git status` on main: clean except the original 2 loose ends.
 
-Goal: replace the silent 60–90s `run_research` / `run_benchmarks` phases with three visible chat messages per phase — pre-flight plan (Haiku) + live activity log (streaming, batched-flushed) + annotated findings (with inline hover-citation superscripts). Spec at `docs/superpowers/specs/2026-05-15-research-transparency-design.md`, plan at `docs/superpowers/plans/2026-05-15-research-transparency.md`.
-
-Shipped (per commit list above):
-- Backend infrastructure: `research_planner.py` (Haiku), `research_streaming.py` (`ActivityFlusher` + `process_stream`), `publish_message_updated` WS helper.
-- `PipelineService.run_research` rewritten to orchestrate plan → activity log → streaming Opus 4.7 → findings.
-- `PipelineService.run_benchmarks` mirrors run_research with Sonnet 4.6.
-- Old `ResearchAgent`/`BenchmarkAgent` tests retired/migrated.
-- New WS event type `message_updated` (carries the full updated message; frontend replaces by id).
-- Four new frontend components: `<ResearchPlanCard />`, `<ResearchActivityLog />`, `<CitationPopover />`, `<ResearchFindingsCard />`.
-- Citation rendering: inline hover superscripts injected via a post-render span-walk; sources list at the bottom.
-
-**Two critical bugs the subagent reviewers caught that synthetic test fixtures hid:**
-
-1. Anthropic web-search citations use `encrypted_index`, not `start_block_index`/`end_block_index`. My spec had the wrong field names; fix computes span offsets by matching `cited_text` against the body. **Without this fix, no citation superscripts would render in production despite green tests.** (`d7de977`)
-2. `RESEARCH_SYSTEM` and `BENCHMARK_SYSTEM` are `str.format()` templates with placeholders like `{client_name}`. My plan passed them raw to `messages.stream` — Bedrock would receive literal `"# Client Research: {client_name}"` in the system prompt. (`27c77e0`, then mirrored in `13f38d7`)
-
-Both fixes have regression tests asserting they can't reoccur silently.
+After this incident, every subsequent frontend-task subagent prompt got a defensive preamble: "ALWAYS prefix `cd frontend && ...` with the FULL worktree path: `cd /Users/karthikramesh/Developer/nuprop/.claude/worktrees/ideation-side-channel/frontend && ...`. Before commit, ALWAYS run `git branch --show-current` to confirm." No subsequent contamination.
 
 ---
 
 ## What's queued for the next session
 
-### Option A — Execute the queued ideation plan (17 tasks)
+### Option A — Task 17 live docker smoke test
 
-**Spec:** `docs/superpowers/specs/2026-05-15-ideation-side-channel-design.md`
-**Plan:** `docs/superpowers/plans/2026-05-15-ideation-side-channel.md`
-**Status:** Both committed (`dc8a55f`, `8f694e7`). User approved. Not yet started.
-
-V1 shape:
-- One additive column on `chat_messages`: `channel: str` (default `"main"`, ideation messages have `"ideation"`).
-- New `IdeationService.run_ideation` worker phase (separate class, read-only-by-construction).
-- Two new API endpoints under `/chat/{id}/ideation/*`.
-- One new frontend drawer (`<IdeationDrawer />`) + always-on `<IdeateButton />` in the proposal page header.
-- Sonnet 4.6 hardcoded with `cache_control: ephemeral` on the proposal-context system block.
-- No retry endpoint (ideation failures surface as inline error messages; user re-prompts).
-
-Resume by invoking `superpowers:subagent-driven-development` and starting from Task 1.
-
-### Option B — Live smoke test of research-transparency
-
-We never ran the new research-transparency feature end-to-end against the real Bedrock + Postgres stack. Auto-tests pass; live behavior is unproven.
+Plan's checklist (`docs/superpowers/plans/2026-05-15-ideation-side-channel.md`, Task 17). In short:
 
 ```bash
 cd /Users/karthikramesh/Developer/nuprop
 docker compose up --build -d
-# wait for health
-# in browser: register → create client → create proposal → drive brief intake → approve template gate
-# watch worker logs for the new plan/activity_log/findings emit sequence
-docker compose logs -f worker
+# wait: curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/v1/health  → 200
+# browser → register → create proposal → click "💡 Ideate" in header
 ```
 
-Things to look for during the smoke test:
-- Pre-flight plan card appears in the chat within ~1–2s of approving the template gate.
-- Activity log card grows live with search queries and URLs being read (look for batched ~750ms updates via `message_updated` WS events).
-- Findings card has citation superscripts inline; hover reveals popover with title + domain + cited snippet; sources list at the bottom.
-- Activity log auto-collapses on completion.
+Things to verify during the smoke test:
+- The drawer slides in from the right (40vw, capped at 560px on desktop).
+- Empty state shows 4 clickable suggestions; clicking one inserts text into the input (does NOT auto-send).
+- After sending: user bubble appears immediately in the drawer; Send button disables while pending; ~5-10s later the assistant reply arrives via WS.
+- **Critically:** the MAIN chat panel shows NO "AI is thinking..." while the ideation drawer is processing (the regression Task 91bb135 fixed).
+- If you force a failure (kill Bedrock creds), an amber error block appears INLINE in the drawer thread within seconds — not on refresh (this is the real-time delivery Task 91bb135 fixed).
+- Refresh with `#ideate` in the URL — the drawer auto-reopens.
+- `pipeline_state.current_phase` on the proposal is unchanged after ideation turns (the read-only invariant — verify in psql).
 
-If anything misbehaves (most likely on hover-citation rendering or the activity-log streaming), the relevant files are:
-- Backend: `app/services/research_streaming.py`, `app/services/pipeline_service.py`
-- Frontend: `frontend/src/components/chat/research-{plan-card,activity-log,findings-card}.tsx`
+### Option B — Cleanup pass on the loose ends
 
-### Option C — Cleanup pass
+1. `backend/app/services/ai/brief_analyzer.py` — uncommitted Haiku-tier switch (10 lines, looks intentional and reasonable). Either commit as `feat: switch brief_analyzer to Haiku 4.5 for chat felt-latency` or revert if you decide Sonnet is the right tier for brief intake.
+2. `.github/workflows/fly-deploy.yml` — untracked, 18 lines. Inspect; either commit as a deploy automation or delete.
 
-Multiple code-review minor flags accumulated and were deliberately not addressed to keep momentum:
-- Unused `pytest` import in `backend/tests/integration/test_research_planner.py`
-- Unused `_FLUSH_MAX_INTERVAL_S` import in `backend/tests/integration/test_research_streaming.py`
-- Inline `from app.services.ai.benchmark_agent import BENCHMARK_SYSTEM` in `pipeline_service.py:240` should move to top
-- Hardcoded `max_searches` values (10 for research, 8 for benchmarks) could be module constants
-- The post-Bedrock dead code: `app/services/ai/research_agent.py` and `app/services/ai/benchmark_agent.py` are no longer called from `PipelineService` (only their constants are imported). Could be deleted as a follow-up.
-- Stale `ANTHROPIC_API_KEY=sk-ant-…` line in `.env.docker` (gitignored, harmless, but should be removed)
+### Option C — Follow-ups flagged by reviewers during this session
 
-A single "cleanup pass" commit would knock these out.
+Deferred to keep the branch tightly scoped to the ideation feature:
 
----
+- **`_make_proposal` test-helper duplication** — now lives in 10 integration test files. Promote to a shared `pytest_asyncio.fixture` in `conftest.py` that accepts optional `brief` / `pipeline_state` kwargs.
+- **Channel-aware typing indicator** — V1 just removed the leaky broadcast. Add an `isIdeationTyping: boolean` slice + render `<TypingIndicator />` inside `IdeationDrawer` + route `typing` events by channel.
+- **Drawer hydration O(n²)** — `useEffect` calls `addMessage` per message on every TanStack refetch; `addMessage` dedupes via `.some()`. For 200-message threads that's 40k comparisons per window-focus. Add a store action that does a single O(n) merge.
+- **Documentation:** the in-repo HANDOFF (this file) is current, but the spec's WS event catalogue should also list the `pipeline_error.phase` values now in use and confirm `message_updated` is channel-aware.
 
-## Deployment status
+### Option D — Production deploy
 
-`fly.toml` is configured with the right `[processes]` block for app + worker. **Fly secrets are not set yet.** The user got partway through deploying (`d610572` fixed the `release_command`'s exec-form vs shell-form bug), but the deploy will fail at Alembic-migration time without secrets. Required:
+Same as the previous handoff. `fly.toml` is configured. Secrets not set:
 
 ```bash
 fly secrets set -a nuprop \
@@ -221,62 +183,92 @@ fly secrets set -a nuprop \
   AWS_REGION="ap-northeast-1"
 ```
 
-Optional later: dedicated IAM user for the worker with Bedrock-only permissions instead of reusing the dev IAM user keys. Recipe is in this session's earlier discussion.
+The ideation migration uses `postgresql_concurrently=True` so it won't lock the hot `chat_messages` table on first prod deploy. Safe.
+
+---
+
+## Architecture deltas worth remembering
+
+### `IdeationService` is read-only by construction
+
+`backend/app/services/ideation_service.py` does NOT call `ProposalRepository.update` anywhere. The class can read `proposal` (via `get_by_id`) but has no write surface for `proposal.*` fields. The only writes are to `chat_messages` with `channel="ideation"`. There are two tests that prove this:
+- `test_run_ideation_does_not_mutate_proposal_fields` — fingerprints `brief`/`research`/`cost_model`/`covering_letter`/`pipeline_state` before/after and asserts unchanged.
+- `test_run_ideation_task_does_not_touch_pipeline_state` — same for the worker wrapper.
+
+### Worker failure isolation
+
+`_run_ideation_phase` in `backend/app/workers/pipeline.py` has its own `try/except` and does NOT call `_set_job_status`. On failure it writes a single `chat_messages` row (role=`system`, `extra_data.kind="error"`, `channel="ideation"`) **and** publishes both a `new_message` event for that row and a `pipeline_error` event. The user-facing `content` is sanitized to a generic `"Couldn't reach Bedrock. Send another message to try again."`; full exception detail lives in `extra_data.error` for engineering.
+
+### Commit-before-broadcast (locked in with a spy test)
+
+`IdeationService.run_ideation` follows the same pattern as the main pipeline: `await self.session.commit()` BEFORE `await self._emit_message(...)`. Test `test_run_ideation_commits_before_broadcasting` installs a spy on `publish` that opens a fresh session inside the callback and asserts the row is already visible at that exact moment. If anyone ever reorders the two lines, this test fails immediately.
+
+### Prompt caching for the ideation system block
+
+The proposal-context system prompt (built by `_build_ideation_system_prompt`) is passed as a list-form block with `cache_control: {"type": "ephemeral"}`. For a brand-new proposal it's ~250-300 tokens (below the 1024-token cache minimum — Bedrock silently bypasses), but for a developed proposal (brief + research + cost model + narrative) it can reach 6-8k tokens, which caches well for multi-turn ideation: turn 1 ~3-5s, turn 2+ ~85% input-token cost reduction and ~1s faster TTFT.
+
+### Frontend store: two slices, both channel-aware
+
+`frontend/src/stores/chat-store.ts` has parallel `messages` and `ideationMessages` slices. **Both** `addMessage` and `updateMessage` route by `msg.channel === 'ideation'`. The latter was fixed during Task 13's review — originally `updateMessage` only touched `state.messages`, which would have silently dropped any future `message_updated` events on the ideation channel. (Currently the ideation worker only emits `new_message`, so `updateMessage` is dormant for ideation, but the routing is in place for when streaming lands.)
 
 ---
 
 ## Gotchas that are easy to forget
 
-### Working directory drift
-Bash commands persist `cwd` between calls in the harness. Many things assume `cwd = /Users/karthikramesh/Developer/nuprop` (repo root). Backend pytest needs `cd backend &&` first because `.venv/bin/python` lives in `backend/`. Frontend pnpm needs `cd frontend &&`. After git commands the cwd resets to the directory you `cd`'d INTO last — easy trap.
+### Working directory drift (now with extra teeth)
+
+Bash commands persist `cwd` between calls in the harness. The original gotcha from the previous handoff still applies — backend pytest needs `cd backend &&` first, frontend pnpm needs `cd frontend &&`. **This session added a new failure mode:** when working in a worktree, an implementer subagent doing `cd /Users/karthikramesh/Developer/nuprop/frontend` (the main checkout's frontend, not the worktree's) silently contaminates main. Defensive pattern that worked for the remaining tasks:
+
+> "ALWAYS prefix bash commands with the absolute worktree path. Before commit, run `git branch --show-current` and confirm you're on the worktree branch."
+
+Build that into every implementer prompt for the next subagent-driven session.
 
 ### Postgres uses VARCHAR(36), not native UUID
-The Alembic initial migration created every ID/FK column as `VARCHAR(36)`. Earlier in this session we tried using native `PG_UUID` on Postgres and crashed on `operator does not exist: character varying = uuid`. The model now uses `String(36)` everywhere and `BaseRepository._coerce_id` always `str()`s. If you ever add a query that compares an ID column, **pass strings, not UUID objects**.
+Unchanged. Pass strings, not UUID objects, to anything that compares ID columns. `BaseRepository._coerce_id` always `str()`s; `ChatMessage.proposal_id == str(proposal_id)` is the pattern.
 
 ### ARQ behavior
-- ARQ does **NOT** auto-retry on a bare `raise`. The worker's `_run_phase` shim was originally written assuming `raise` → ARQ retries — wrong. It now treats every exception as terminal: writes `pipeline_state.job_status.state = "failed"`, emits a `pipeline_error` WS event, and returns. User retries via the `POST /chat/{id}/retry` endpoint.
-- `_job_id` is an idempotency key. For multi-turn brief intake the job_id includes the `user_msg.id` so each turn is a fresh job. For one-shot gate approvals (template/cost_model/narrative) the job_id is bare `{proposal_id}:{phase}` to prevent double-clicks.
+Unchanged. Bare `raise` does NOT auto-retry. The main pipeline's `_run_phase` and ideation's `_run_ideation_phase` both treat every exception as terminal. For ideation, the user re-prompts (each prompt is a fresh job_id keyed on `user_msg.id`). Main-pipeline gates use the bare `{proposal_id}:{phase}` job_id form for one-shot click-through; ideation always uses the per-turn form.
 
-### Bedrock model IDs (verified, not guessed)
+### Bedrock model IDs (verified)
 ```
 Heavy    : global.anthropic.claude-opus-4-7
 Balanced : global.anthropic.claude-sonnet-4-6        (NOT -v1)
 Fast     : global.anthropic.claude-haiku-4-5-20251001-v1:0
 ```
-Verified via `aws bedrock list-inference-profiles --region ap-northeast-1`.
+Ideation uses `Tier.BALANCED` (Sonnet 4.6). Verified via `aws bedrock list-inference-profiles --region ap-northeast-1`.
 
 ### Opus 4.7 constraints
-- Do **not** pass `temperature`, `top_p`, or `top_k` — returns 400. `AIService._build_kwargs` strips these automatically when `tier == Tier.HEAVY`.
-- Extended thinking only supports `thinking={"type": "adaptive"}`. Old `{type: enabled, budget_tokens}` returns 400.
+Unchanged. No `temperature`/`top_p`/`top_k`. `thinking={"type": "adaptive"}` only. `AIService._build_kwargs` strips these when `tier == Tier.HEAVY`. Ideation doesn't hit this path today (it uses BALANCED), but if you ever flip it to HEAVY, also strip `temperature=0.7` from the `messages_create` call — there's an inline note in `ideation_service.py` flagging this.
 
 ### `_no_network` test guard
-`backend/tests/conftest.py:_no_network` patches `AnthropicClient.complete`/`.complete_json`/`.stream`/`.is_configured` to fail loudly on accidental real API calls. After the Bedrock migration, `is_configured` is always `True` in production (auth happens at call time); the guard explicitly monkeypatches it back to `False` during tests so AI agents take their non-LLM fallback paths.
+Unchanged. `backend/tests/conftest.py:_no_network` patches `AnthropicClient.*` and `is_configured` so accidental real calls fail loudly. The ideation tests bypass this guard cleanly by monkeypatching `get_ai_service` directly to return a `_StubAI` — no conflict with the autouse guard.
 
-### WebSocket event types
-- `new_message` — a fresh chat message is being added to the thread.
-- `message_updated` — **NEW** in this session. An existing message's full state has changed (e.g., the activity log got more events). Frontend looks up by id and replaces.
-- `typing` — typing-indicator toggle.
-- `phase_change` — pipeline_state.current_phase changed.
-- `progress` — per-phase progress event (used by phases that DON'T have a structured activity log: cost_model, narrative, outputs).
-- `pipeline_error` — terminal failure of a phase.
+### WebSocket event types catalogue
+
+Updated this session:
+
+- `new_message` — fresh chat message. Carries `channel` field. Frontend routes by `channel`.
+- `message_updated` — existing message's full state changed (e.g., activity log got more events). Frontend's `updateMessage` IS channel-aware (this session's fix) but the ideation worker only emits `new_message`, so the routing is dormant for ideation today.
+- `typing` — typing-indicator toggle. **`isTyping` is a single shared scalar.** Ideation does NOT emit this (would contaminate main chat). A channel-aware version is a follow-up.
+- `phase_change` — main pipeline's `current_phase` changed. Ideation does NOT emit this.
+- `progress` — per-phase progress. Ideation does NOT emit this.
+- `pipeline_error` — terminal phase failure. NEW shape: `{type, phase, error}`. Main pipeline emits `phase: "research"`, `"build_cost_model"`, etc. Ideation emits `phase: "ideation"` (not `"run_ideation"` — the function-name form was rejected in review for being internal). Frontend hook has a no-op `console.warn` handler; the user-facing error message arrives as a separate `new_message` with `role=system`, `extra_data.kind="error"`.
 
 ### Channel-by-message routing on the frontend
-The frontend's `chat-store` has only one `messages` slice today. **When ideation lands** (Option A), it'll add a parallel `ideationMessages` slice and route incoming WS messages by their `channel` field. The store's `updateMessage` (added today) only operates on `messages` for now; will need to be channel-aware then.
+
+`chat-store.ts` has TWO slices: `messages` (channel "main") and `ideationMessages` (channel "ideation"). Both `addMessage` and `updateMessage` route by `msg.channel`. `setMessages` is main-only by design (used by initial hydration of the main pipeline). The drawer hydrates from `useIdeationMessages` by iterating the response and calling `addMessage` per row (dedupes by id) — O(n²) per refetch, fine for short threads, flagged as follow-up for long ones.
+
+---
+
+## Deployment status
+
+Unchanged structurally from the previous session. Ideation's Alembic migration uses `op.get_context().autocommit_block()` + `postgresql_concurrently=True`, so `CREATE INDEX` on `chat_messages` won't lock the table during first prod deploy. Otherwise: `fly.toml` ready, secrets not set, no CI workflow live yet (the untracked `fly-deploy.yml` is a candidate to commit if it's the right shape — needs inspection).
 
 ---
 
 ## How to resume
 
-1. Read this file end-to-end (~5 min).
-2. Check `git log --oneline -20` and `git status` to confirm state matches what's documented here.
-3. Look at the project memory for additional context that didn't fit here:
-   ```
-   ~/.claude/projects/-Users-karthikramesh-Developer-nuprop/memory/project_build_progress.md
-   ```
-4. Ask the user: **"You have two queued items: execute the ideation plan, or live-smoke-test the research-transparency build. Which first?"**
-
-If they pick ideation execution: invoke `superpowers:subagent-driven-development` and start from Task 1 of `docs/superpowers/plans/2026-05-15-ideation-side-channel.md`. The plan was approved before being queued; don't re-design.
-
-If they pick the smoke test: bring up the stack with `docker compose up --build -d` and walk them through driving a proposal through the brief → template approval → research → benchmarks gate. Watch `docker compose logs -f worker` for the new plan/activity_log/findings emit sequence.
-
-If they want neither: do Option C (cleanup pass) or ask what they want.
+1. Read this file end-to-end (~3 min).
+2. `git log --oneline -5`, `git status` — confirm `91bb135` is HEAD and the two loose ends still pending.
+3. `~/.claude/projects/-Users-karthikramesh-Developer-nuprop/memory/session_handoff_2026_05_16.md` has the same pointer + a quick-verification block.
+4. Ask the user which queued item to pick — A (smoke test), B (loose-ends cleanup), C (review follow-ups), D (production deploy). Default if they want momentum: **A**, since it's the last unverified gap on a freshly-merged feature.
