@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useProposal, useChatMessages } from '../../api/proposals'
 import { useClient } from '../../api/clients'
@@ -9,6 +9,8 @@ import { Nav } from '../../components/layout/nav'
 import { PipelineSidebar } from '../../components/chat/pipeline-sidebar'
 import { ChatContainer } from '../../components/chat/chat-container'
 import { PreferencePanel } from '../../components/chat/preference-panel'
+import { IdeateButton } from '../../components/chat/ideate-button'
+import { IdeationDrawer } from '../../components/chat/ideation-drawer'
 
 export function BuilderPage() {
   const { id } = useParams<{ id: string }>()
@@ -20,6 +22,8 @@ export function BuilderPage() {
   const setMessages = useChatStore((s) => s.setMessages)
   const setPipelinePhase = useChatStore((s) => s.setPipelinePhase)
   const reset = useChatStore((s) => s.reset)
+
+  const [ideateOpen, setIdeateOpen] = useState(false)
 
   useEffect(() => {
     if (initialMessages) setMessages(initialMessages)
@@ -52,6 +56,10 @@ export function BuilderPage() {
   return (
     <div className="min-h-screen bg-stone-50">
       <Nav />
+      {/* top-14 matches Nav's h-14; z-50 keeps the button visible above the drawer's overlay */}
+      <div className="fixed top-14 right-6 z-50">
+        <IdeateButton open={ideateOpen} onToggle={setIdeateOpen} />
+      </div>
       <div className="flex pt-14 h-screen">
         <PipelineSidebar proposal={proposal} clientName={client?.name} />
         <main className="flex-1 flex flex-col min-w-0">
@@ -64,6 +72,7 @@ export function BuilderPage() {
         </main>
         <PreferencePanel proposal={proposal} templateConfig={template?.config} />
       </div>
+      <IdeationDrawer open={ideateOpen} onClose={() => setIdeateOpen(false)} proposalId={id!} />
     </div>
   )
 }
