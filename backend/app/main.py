@@ -21,8 +21,32 @@ from app.views.v1.router import api_router
 settings = get_settings()
 
 
+def _validate_connector_secrets(s) -> None:  # noqa: ANN001 — accepts Settings or test double
+    """Refuse to boot if connectors are configured but the token-vault
+    encryption key is empty. Detection is by presence of OAuth client IDs —
+    see Q2 in the S1 design doc. Dev environments without any connector
+    creds still boot fine."""
+    connector_enabled = bool(s.GOOGLE_CLIENT_ID) or bool(s.SLACK_CLIENT_ID)
+    if connector_enabled and not s.ENCRYPTION_KEY:
+        which = []
+        if s.GOOGLE_CLIENT_ID:
+            which.append("GOOGLE_CLIENT_ID")
+        if s.SLACK_CLIENT_ID:
+            which.append("SLACK_CLIENT_ID")
+        raise RuntimeError(
+            "Refusing to start: connector credentials are set ("
+            + ", ".join(which)
+            + ") but ENCRYPTION_KEY is empty. Set ENCRYPTION_KEY (Fernet key) "
+            "to enable token-vault encryption, or unset the connector "
+            "credentials to disable the connectors entirely."
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Fail loud if connectors are configured but token-vault isn't.
+    _validate_connector_secrets(settings)
+
     # Create tables (dev only — production uses Alembic)
     if not settings.is_production:
         async with engine.begin() as conn:
