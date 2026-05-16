@@ -20,7 +20,7 @@ What landed:
 **Outstanding immediate work for the next session:**
 
 - **Task 17 docker smoke test ✅** passed — drove a real two-turn Bedrock conversation end-to-end in the browser, confirmed channel isolation in DB + API, confirmed the read-only invariant on `pipeline_state`, and confirmed the no-typing-leak fix from `91bb135`. Details under "What's queued / Option A" below. The forced-failure path was NOT exercised live (worker AWS mount is read-only) — unit coverage is comprehensive.
-- **Two pre-existing register-flow bugs surfaced during the smoke test** (frontend, not in ideation): `/register` posts `name` instead of `full_name` (422), and the frontend crashes with React error #31 when rendering the resulting Pydantic validation error. See Option C below.
+- **Register-flow React #31 crash ✅ FIXED** in commit `b363d6f` — `formatApiError(err, fallback)` helper in `frontend/src/api/client.ts` now safely renders Pydantic 422 array responses as a joined `msg` string. The previously-reported "frontend sends `name` instead of `full_name`" was a misattribution (auth-store sends `full_name` correctly; the smoke-test 422 came from the email validator rejecting `.local`). See Option C below for details.
 - **Loose ends on main's working tree** (untouched throughout this session, both from a prior session): uncommitted `backend/app/services/ai/brief_analyzer.py` (Haiku-tier switch — 10-line change) and untracked `.github/workflows/fly-deploy.yml` (18 lines, looks like an early CI deploy attempt). Decide commit / revert / amend.
 - **Production:** `fly.toml` still needs AWS secrets set via `fly secrets set` before a real deploy can complete (see "Deployment" below). Unchanged from the previous session.
 
@@ -158,14 +158,14 @@ Ran via `docker compose up --build -d` + Playwright. Stack came up clean, migrat
 1. `backend/app/services/ai/brief_analyzer.py` — uncommitted Haiku-tier switch (10 lines, looks intentional and reasonable). Either commit as `feat: switch brief_analyzer to Haiku 4.5 for chat felt-latency` or revert if you decide Sonnet is the right tier for brief intake.
 2. `.github/workflows/fly-deploy.yml` — untracked, 18 lines. Inspect; either commit as a deploy automation or delete.
 
-### Option C — Frontend register-flow bugs (surfaced during smoke test)
+### Option C — Frontend register-flow bug ✅ FIXED (commit `b363d6f`)
 
-Both pre-existing, unrelated to ideation. The login flow is fine — these only affect first-time registration of new agencies, which is why they haven't been noticed sooner.
+Originally flagged as two bugs after the smoke test. On follow-up inspection only ONE was real:
 
-1. **`/register` sends `name` instead of `full_name`** — backend `RegisterRequest` requires `full_name`; the form's submit handler in `frontend/src/pages/register.tsx` (or wherever the mutation is) posts `{name, agency_name, email, password}`. Backend returns 422 every time. Fix: rename the form's field (and any related state/zod schema) from `name` → `full_name`.
-2. **React error #31 on the 422 response** — when registration 422s, the frontend tries to render the Pydantic validation-error object (`{detail: [{type, loc, msg, input, ctx}, ...]}`) as a React child and crashes with `Objects are not valid as a React child`. Need an `error?.response?.data?.detail?.map(d => d.msg).join(', ')` or similar in the error display. Same fix probably needs replicating wherever else API errors are surfaced in the UI.
+- **~~`/register` sends `name` instead of `full_name`~~** — NOT A BUG. `auth-store.ts:29` already sends `full_name: fullName` correctly. My smoke-test report conflated my own manual `curl` (which DID post `name`) with what the frontend does. The 422 from the live UI was actually from the email validator rejecting `.local`.
+- **React error #31 on rendering 422 responses** — REAL. Fixed: new helper `formatApiError(err, fallback)` in `frontend/src/api/client.ts` returns a string from any axios-error shape (Pydantic 422 array gets `msg` fields joined with `; `; HTTPException string detail passes through; unknown shapes fall back). Applied at the two crash sites: `pages/auth/register.tsx:22` and `pages/proposals/new.tsx:25`. 5 new vitest cases lock the contract (`client.test.ts`). 120 frontend tests pass.
 
-Bonus context: `@test.local` is also rejected by the email validator (`The part after the @-sign is a special-use or reserved name`). Use `.com` / `.test` / `.example` for test accounts. Not a bug, just a footgun — worth a note in CLAUDE.md or a fixture for smoke tests.
+Bonus context still valid: `@test.local` is rejected by the email validator (`The part after the @-sign is a special-use or reserved name`). Use `.com` / `.test` / `.example` for test accounts. Not a bug, just a footgun.
 
 ### Option D — Follow-ups flagged by reviewers during this session
 
@@ -278,4 +278,4 @@ Unchanged structurally from the previous session. Ideation's Alembic migration u
 1. Read this file end-to-end (~3 min).
 2. `git log --oneline -5`, `git status` — confirm the latest `docs:` commit is HEAD and the two loose ends still pending.
 3. `~/.claude/projects/-Users-karthikramesh-Developer-nuprop/memory/session_handoff_2026_05_16.md` has the same pointer + a quick-verification block.
-4. Ask the user which queued item to pick — A (smoke test, ✅ done — only re-run if Bedrock or migration semantics change), B (loose-ends cleanup), C (register-flow bugs), D (review follow-ups), E (production deploy). Default if they want momentum: **C**, since those bugs block any new user from registering through the UI.
+4. Ask the user which queued item to pick — A (smoke test, ✅ done — only re-run if Bedrock or migration semantics change), B (loose-ends cleanup), C (register-flow bug, ✅ fixed in `b363d6f`), D (review follow-ups), E (production deploy). Default if they want momentum: **B** (loose-ends) or **D** (reviewer follow-ups).

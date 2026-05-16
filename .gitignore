@@ -31,3 +31,4 @@ backend/outputs/
 alembic/versions/__pycache__/
 
 .claude
+.playwright-mcp/
