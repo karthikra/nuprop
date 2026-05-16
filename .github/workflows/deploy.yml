@@ -1,10 +1,9 @@
 name: Deploy to Fly.io
 
 on:
-  # Disabled until Fly.io app is created and FLY_API_TOKEN secret is set
-  # push:
-  #   branches: [main]
-  workflow_dispatch:  # Manual trigger only
+  push:
+    branches: [main]
+  workflow_dispatch:  # Also allow manual re-deploy from the Actions UI
 
 jobs:
   deploy:
