@@ -1,9 +1,11 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-16 (end of day)
-**Latest commit on `main`:** `1bc818c` (pushed to `origin/main`)
+**Last updated:** 2026-05-16 (mid-day rewrite — auto-deploy enabled + M16-M20 truth baseline)
+**Latest commit on `main`:** `9194bd0` (pushed to `origin/main`)
 **Working tree:** clean. Branch: `main`. No worktrees.
-**Production:** **LIVE at https://nuprop.fly.dev** — `GET /api/v1/health → 200`.
+**Production:** **LIVE at https://nuprop.fly.dev** — `GET /api/v1/health → 200`. **Auto-deploys on push to `main`** (GitHub Actions, `FLY_API_TOKEN` secret set).
+
+> ⚠️ **Earlier versions of this file claimed M16-M20 were unstarted.** That was wrong. M16-M20 are substantially scaffolded at the backend — see `docs/superpowers/audits/2026-05-16-m16-m20-state-audit.md` for the full audit. The "Next session" menu below is updated to reflect actual state.
 
 > Read this top-to-bottom (~3 min) on resume. The "Quick verification" block at the bottom gets you from `/clear` to "ready to keep working" in 60 seconds of bash.
 
@@ -175,49 +177,29 @@ cd frontend && pnpm build
 
 ## Next session — pick one
 
-### Option A — Wire up GitHub Actions auto-deploy
+### Option A — Wire up GitHub Actions auto-deploy ✅ DONE 2026-05-16
 
-`.github/workflows/deploy.yml` exists with the `push:` block commented out. To enable:
+`FLY_API_TOKEN` GH secret set, `.github/workflows/deploy.yml` uncommented (`push: branches: [main]` active, `workflow_dispatch:` kept for manual re-deploys). First auto-deploy run `25965414713` succeeded in 2m14s. Every push to `main` now redeploys prod.
 
-```bash
-# 1. Generate a Fly deploy token
-fly tokens create deploy
+### Option B — Finish M16-M20 (the REAL state)
 
-# 2. Copy the token to GitHub repo secrets:
-#    Repo → Settings → Secrets and variables → Actions → New repository secret
-#    Name: FLY_API_TOKEN
-#    Value: (paste the token)
+**M16-M20 are ~60% built, 40% remaining.** The 40% is the hardest 40%: backend hardening (5 CRITICAL security issues), frontend UI completion (Drive/Calendar/Slack have no React Query hooks, no Slack callback route, zero tests for any of this surface), pipeline integration (only 1 of 7 phases consumes M16-M20 data), and production OAuth wiring (5 missing Fly secrets + 2 unregistered OAuth apps).
 
-# 3. Edit .github/workflows/deploy.yml, change:
-#      # push:
-#      #   branches: [main]
-#    to:
-#      push:
-#        branches: [main]
-#    AND remove the `workflow_dispatch:` line.
+**Full audit:** `docs/superpowers/audits/2026-05-16-m16-m20-state-audit.md` — read this before touching M16-M20 code.
 
-# 4. Commit + push. The very push that lands this change will trigger the first auto-deploy.
-git add .github/workflows/deploy.yml
-git commit -m "ci: enable auto-deploy on push to main"
-git push origin main
-# Watch: https://github.com/karthikra/nuprop/actions
-```
+**Slicing strategy (S0 → S6, ~5-8 dev-days + ~1hr of user OAuth-console clicks):**
 
-~5 minutes. Low risk — even if the deploy fails, you just get a red X on Actions, and manual `fly deploy` still works.
+| Slice | Estimate | What ships |
+|---|---|---|
+| ~~S0~~ — Truth baseline | ~~0.25d~~ ✅ done 2026-05-16 | This handoff rewrite + audit doc + memory |
+| **S1** — Backend CRITICAL fixes | 1d | Fail-loud encryption, OAuth CSRF, module-level logging, DI for services, narrowed excepts |
+| **S2** — Manual context UI on Client page | 1d | M16 shippable end-to-end |
+| **S3** — Connector frontend + Slack callback + tests | 1.5d | M17-M19 frontend parity |
+| **S4** — Production OAuth wiring | 0.5d | Google + Slack OAuth apps registered, secrets set, smoke-tested |
+| **S5** — Pipeline integration | 1.5d | Wire context_brief into 5 unwired phases; `build_cost_model` consumes `proposal.preferences`; ideation gets relationship context; email auto-enrichment post-sync |
+| **S6** — Backend HIGH/MEDIUM polish + retry/backoff | 1d | Defer-able |
 
-### Option B — PRD M16-M20 (client context + connectors)
-
-The unstarted PRD work, ordered for dependency:
-
-| # | Milestone | Days | Why this order |
-|---|---|---|---|
-| M16 | Manual Context + Client Context Profile | 1 | Smallest, self-contained, unblocks connectors |
-| M17-M19 | Gmail + Drive + Calendar + Slack connectors | ~4.5 | Cluster — share OAuth + token-vault + retrieval plumbing |
-| M20 | Context Intelligence Layer | 1 | Fuses connector data into proposal context |
-
-M16 is the obvious next concrete feature. Self-contained (one form on the client edit page + one new endpoint), no infra, no third-party dependencies.
-
-The connector trio (M17-M19) is the biggest unit of value but also the heaviest — needs Google OAuth app setup, Slack OAuth app setup, and a token-encryption scheme. Plan it as one unit, not three sequential tickets.
+Each slice gets its own spec in `docs/superpowers/specs/`, its own worktree, and a user-approval checkpoint at the end. **Active slice: S1** (in worktree `m16-m20-s1-backend-hardening`).
 
 ### Option C — Production hardening
 
