@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 import httpx
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class GDriveClient:
@@ -46,7 +50,11 @@ class GDriveClient:
                 )
                 r.raise_for_status()
                 return r.text[:5000]  # Cap at 5K chars
-            except Exception:
+            except httpx.HTTPError as exc:
+                logger.warning(
+                    "Drive document export failed; returning empty content",
+                    extra={"event": "connector.drive.export_failed", "error": str(exc)},
+                )
                 return ""
 
     async def search_client_documents(

@@ -4,7 +4,11 @@ from urllib.parse import urlencode
 
 import httpx
 
+import logging
+
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class SlackClient:
