@@ -272,6 +272,12 @@ class ConnectorViewModel(ViewModelBase):
                     access_token, domain, since, limit=100,
                 )
                 if not messages:
+                    # No messages between `since` and now — confirm we're up to date.
+                    # Advance the watermark to "now" so the next run doesn't re-fetch
+                    # an empty window from the same `since`.
+                    per_domain_watermark[domain] = datetime.now(timezone.utc).isoformat()
+                    await self._persist_gmail_watermark(agency_id, per_domain_watermark)
+                    synced_domains.append(domain)
                     continue
 
                 msg_ids = [m["id"] for m in messages]
@@ -343,6 +349,7 @@ class ConnectorViewModel(ViewModelBase):
         gmail_settings["email_count"] = email_count
         settings["gmail"] = gmail_settings
         await self.agency_repo.update(agency_id, settings=settings)
+        await self._db.commit()
 
         duration = round(time.time() - start, 1)
         return {
@@ -365,7 +372,7 @@ class ConnectorViewModel(ViewModelBase):
         gmail = dict(settings.get("gmail", {}))
         gmail["last_sync_per_domain"] = per_domain
         if per_domain:
-            gmail["last_sync"] = min(per_domain.values())
+            gmail["last_sync"] = max(per_domain.values())
         else:
             gmail["last_sync"] = datetime.now(timezone.utc).isoformat()
         settings["gmail"] = gmail
