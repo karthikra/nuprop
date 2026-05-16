@@ -223,3 +223,49 @@ async def test_notification_repo_counts_and_mark_read(db):
     await repo.mark_read(notifs[0].id, agency.id)
     await db.commit()
     assert await repo.unread_count(agency.id) == 1
+
+
+async def test_email_index_upsert_many_persists_in_chunks(db, make_proposal_db):
+    """upsert_many must commit per chunk so a later failure does not lose
+    rows that were already added."""
+    from app.infrastructure.db.models.base import _uuid_default
+    from app.infrastructure.db.models.email_index import EmailIndex
+    from app.infrastructure.db.repositories.email_index_repo import EmailIndexRepository
+
+    agency, _client, _proposal = await make_proposal_db()
+    repo = EmailIndexRepository(db)
+
+    now = datetime.now(timezone.utc)
+    rows = [
+        EmailIndex(
+            id=_uuid_default(),
+            agency_id=str(agency.id),
+            gmail_message_id=f"msg-{i}",
+            gmail_thread_id=f"thr-{i}",
+            client_domain="example.com",
+            client_name="Example",
+            message_type="general",
+            sentiment="neutral",
+            priority="medium",
+            summary=f"summary {i}",
+            entities={},
+            from_address="x@example.com",
+            to_addresses=["us@nuprop.dev"],
+            subject=f"hello {i}",
+            date=now,
+            has_attachments=False,
+            synced_at=now,
+        )
+        for i in range(7)
+    ]
+    written = await repo.upsert_many(rows, chunk_size=3)
+    assert written == 7
+    # All visible after the call
+    count = await repo.count_by_agency(agency.id)
+    assert count == 7
+
+
+async def test_email_index_upsert_many_empty_list_returns_zero(db):
+    from app.infrastructure.db.repositories.email_index_repo import EmailIndexRepository
+    repo = EmailIndexRepository(db)
+    assert await repo.upsert_many([], chunk_size=50) == 0

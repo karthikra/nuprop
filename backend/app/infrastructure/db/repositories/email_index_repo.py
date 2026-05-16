@@ -70,3 +70,23 @@ class EmailIndexRepository(BaseRepository[EmailIndex]):
             delete(EmailIndex).where(EmailIndex.agency_id == _id(agency_id))
         )
         return result.rowcount
+
+    async def upsert_many(
+        self, rows: list[EmailIndex], chunk_size: int = 50,
+    ) -> int:
+        """Persist a list of EmailIndex rows in chunks, committing each chunk.
+
+        This bounds the rollback blast radius: a failure mid-way through one
+        chunk loses at most `chunk_size` rows, while everything committed
+        before is preserved. Caller is expected to have already filtered out
+        duplicates (use `get_existing_message_ids` first).
+        """
+        if not rows:
+            return 0
+        written = 0
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i : i + chunk_size]
+            self.session.add_all(chunk)
+            await self.session.commit()
+            written += len(chunk)
+        return written
