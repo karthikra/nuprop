@@ -59,6 +59,10 @@ export function useProposalWebSocket(proposalId: string | undefined) {
               status: (data.status as 'searching' | 'complete' | 'error') || 'searching',
               detail: data.detail || '',
             })
+          } else if (data.type === 'pipeline_error') {
+            // Observability only — the user-facing error message arrives as a separate
+            // new_message event with role=system + extra_data.kind=error.
+            console.warn('pipeline_error:', data)
           }
         } catch {
           // ignore malformed messages

@@ -16,6 +16,8 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # CONCURRENTLY can't run inside a transaction in PostgreSQL.
+    # autocommit_block handles this; SQLite silently ignores it.
     op.add_column(
         "chat_messages",
         sa.Column(
@@ -25,16 +27,20 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
-    op.create_index(
-        op.f("ix_chat_messages_proposal_channel_created"),
-        "chat_messages",
-        ["proposal_id", "channel", "created_at"],
-    )
+    with op.get_context().autocommit_block():
+        op.create_index(
+            op.f("ix_chat_messages_proposal_channel_created"),
+            "chat_messages",
+            ["proposal_id", "channel", "created_at"],
+            postgresql_concurrently=True,
+        )
 
 
 def downgrade() -> None:
-    op.drop_index(
-        op.f("ix_chat_messages_proposal_channel_created"),
-        table_name="chat_messages",
-    )
+    with op.get_context().autocommit_block():
+        op.drop_index(
+            op.f("ix_chat_messages_proposal_channel_created"),
+            table_name="chat_messages",
+            postgresql_concurrently=True,
+        )
     op.drop_column("chat_messages", "channel")

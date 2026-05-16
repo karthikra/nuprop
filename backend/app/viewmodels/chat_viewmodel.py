@@ -167,7 +167,11 @@ class ChatViewModel(ViewModelBase):
             channel="ideation",
         )
         await self._broadcast_msg(proposal_id, user_msg)
-        await ws_manager.broadcast(str(proposal_id), {"type": "typing", "typing": True})
+        # NOTE: we deliberately do NOT broadcast a `typing` event — `isTyping` is a single
+        # main-channel-only flag in the frontend store, and lighting it here would show
+        # "AI is thinking..." in the MAIN chat panel. The drawer signals progress via
+        # the mutation's `isPending` state (Send button disabled). A channel-aware
+        # typing indicator is a follow-up.
 
         # Per-turn idempotency: each user message is a fresh ideation run.
         await self._enqueue(

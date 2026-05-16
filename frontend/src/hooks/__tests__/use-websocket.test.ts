@@ -127,6 +127,20 @@ describe('useProposalWebSocket', () => {
     })
   })
 
+  it('routes ideation-channel new_message to ideationMessages, not messages', () => {
+    renderHook(() => useProposalWebSocket('prop-1'))
+    const message = {
+      id: 'm-ideation-1', proposal_id: 'prop-1', role: 'system', message_type: 'text',
+      content: "Couldn't reach Bedrock. Send another message to try again.",
+      extra_data: { kind: 'error', error: 'bedrock unreachable' },
+      phase: 'ideation', channel: 'ideation', created_at: '2026-01-01T00:00:00Z',
+    }
+    act(() => MockWebSocket.instances[0].emit({ type: 'new_message', message }))
+    expect(useChatStore.getState().ideationMessages).toHaveLength(1)
+    expect(useChatStore.getState().messages).toHaveLength(0)
+    expect(useChatStore.getState().ideationMessages[0].id).toBe('m-ideation-1')
+  })
+
   it('ignores malformed messages without throwing', () => {
     renderHook(() => useProposalWebSocket('prop-1'))
     expect(() => {

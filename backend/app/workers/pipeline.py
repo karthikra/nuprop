@@ -118,8 +118,9 @@ async def _run_ideation_phase(ctx: dict, proposal_id: str) -> None:
             await IdeationService(session, ctx["redis"]).run_ideation(proposal_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("ideation phase failed for %s", proposal_id)
+        from app.domain.schemas.chat_schemas import ChatMessageResponse
         async with async_session_factory() as session:
-            await ChatMessageRepository(session).create(
+            error_msg = await ChatMessageRepository(session).create(
                 proposal_id=proposal_id,
                 role="system",
                 message_type="text",
@@ -129,6 +130,13 @@ async def _run_ideation_phase(ctx: dict, proposal_id: str) -> None:
                 channel="ideation",
             )
             await session.commit()
+            # Broadcast the error row as a regular new_message so the drawer's
+            # message-list rendering picks it up via the existing addMessage path.
+            await publish(ctx["redis"], proposal_id, {
+                "type": "new_message",
+                "message": ChatMessageResponse.model_validate(error_msg).model_dump(mode="json"),
+            })
+        # Keep the pipeline_error broadcast for observability.
         await publish(ctx["redis"], proposal_id, {
             "type": "pipeline_error",
             "phase": "ideation",

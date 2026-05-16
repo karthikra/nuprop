@@ -86,8 +86,18 @@ async def test_run_ideation_task_records_error_message_on_failure(db, monkeypatc
         refetched = await ProposalRepository(fresh).get_by_id(pid)
     assert refetched.pipeline_state == pipeline_state_before
 
-    # Verify the pipeline_error WS event was published.
-    assert sent, "expected a pipeline_error publish call"
-    pid_sent, payload = sent[0]
-    assert str(pid_sent) == pid
-    assert payload == {"type": "pipeline_error", "phase": "ideation", "error": "bedrock unreachable"}
+    # Two publishes expected: new_message for the error row, then pipeline_error.
+    assert len(sent) == 2, f"expected 2 publish calls, got {len(sent)}: {sent}"
+    first_type = sent[0][1]["type"]
+    second_type = sent[1][1]["type"]
+    assert {first_type, second_type} == {"new_message", "pipeline_error"}
+
+    # The new_message carries the error row.
+    new_msg_payload = next(p for _, p in sent if p["type"] == "new_message")
+    assert new_msg_payload["message"]["channel"] == "ideation"
+    assert new_msg_payload["message"]["role"] == "system"
+    assert new_msg_payload["message"]["extra_data"]["kind"] == "error"
+
+    # pipeline_error is also present for observability.
+    pipeline_err_payload = next(p for _, p in sent if p["type"] == "pipeline_error")
+    assert pipeline_err_payload == {"type": "pipeline_error", "phase": "ideation", "error": "bedrock unreachable"}
