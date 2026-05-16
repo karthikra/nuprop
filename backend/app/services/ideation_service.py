@@ -14,6 +14,13 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.schemas.chat_schemas import ChatMessageResponse
+from app.infrastructure.db.models.chat_message import MessageRole, MessageType
+from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
+from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+from app.infrastructure.queue.events import publish
+from app.services.llm import Tier, get_ai_service
+
 logger = logging.getLogger(__name__)
 
 
@@ -113,11 +120,67 @@ def _build_ideation_system_prompt(proposal) -> str:
 
 
 class IdeationService:
-    """Worker-side runner for the ideation phase. Filled in by the next task."""
+    """Worker-side runner for the ideation phase.
+
+    Read-only by construction: this class does NOT call
+    ``ProposalRepository.update`` or write to any ``proposal.*`` field. The
+    only writes it performs are to ``chat_messages`` with
+    ``channel="ideation"``.
+    """
 
     def __init__(self, session: AsyncSession, redis):
         self.session = session
         self.redis = redis
+        self.proposal_repo = ProposalRepository(session)
+        self.msg_repo = ChatMessageRepository(session)
+        self.ai = get_ai_service()
 
     async def run_ideation(self, proposal_id: UUID | str) -> None:
-        raise NotImplementedError  # implemented in Task 5
+        proposal = await self.proposal_repo.get_by_id(proposal_id)
+        if proposal is None:
+            logger.warning("run_ideation: proposal %s not found", proposal_id)
+            return
+
+        history = await self.msg_repo.list_by_proposal(
+            proposal_id, channel="ideation", limit=200,
+        )
+        messages = [
+            {"role": m.role, "content": m.content}
+            for m in history
+            if m.role in (MessageRole.USER.value, MessageRole.ASSISTANT.value)
+        ]
+
+        system_text = _build_ideation_system_prompt(proposal)
+        response = await self.ai.messages_create(
+            model=self.ai.model_for(Tier.BALANCED),
+            max_tokens=2048,
+            temperature=0.7,
+            system=[{
+                "type": "text",
+                "text": system_text,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=messages,
+        )
+        response_text = response.content[0].text
+
+        assistant_msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.ASSISTANT.value,
+            message_type=MessageType.TEXT.value,
+            content=response_text,
+            phase="ideation",
+            channel="ideation",
+        )
+        await self.session.commit()  # commit BEFORE broadcast
+        await self._emit_message(proposal_id, assistant_msg)
+
+    async def _emit_message(self, proposal_id, msg) -> None:
+        await publish(
+            self.redis,
+            str(proposal_id),
+            {
+                "type": "new_message",
+                "message": ChatMessageResponse.model_validate(msg).model_dump(mode="json"),
+            },
+        )

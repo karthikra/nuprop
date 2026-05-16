@@ -125,6 +125,8 @@ def ws_publish_spy(monkeypatch):
     monkeypatch.setattr("app.infrastructure.queue.events.publish", _spy)
     # PipelineService imports `publish` by name — patch that binding too
     monkeypatch.setattr("app.services.pipeline_service.publish", _spy, raising=False)
+    # IdeationService also imports `publish` by name
+    monkeypatch.setattr("app.services.ideation_service.publish", _spy, raising=False)
     return published
 
 
