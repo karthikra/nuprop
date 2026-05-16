@@ -82,6 +82,22 @@ class ChatViewModel(ViewModelBase):
             return None
         return await self.msg_repo.list_by_proposal(proposal_id, skip=skip, limit=limit)
 
+    async def get_ideation_messages(
+        self,
+        proposal_id: UUID,
+        agency_id: UUID,
+        skip: int = 0,
+        limit: int = 200,
+    ) -> list[ChatMessage] | None:
+        proposal = await self.proposal_repo.get_by_id(proposal_id)
+        if not proposal or str(proposal.agency_id) != str(agency_id):
+            self.error = "Proposal not found"
+            self.status_code = 404
+            return None
+        return await self.msg_repo.list_by_proposal(
+            proposal_id, skip, limit, channel="ideation",
+        )
+
     async def send_message(
         self,
         proposal_id: UUID,
@@ -126,6 +142,39 @@ class ChatViewModel(ViewModelBase):
         await self._broadcast_msg(proposal_id, assistant_msg)
         self.status_code = 201
         return [user_msg, assistant_msg]
+
+    async def send_ideation_message(
+        self,
+        proposal_id: UUID,
+        agency_id: UUID,
+        content: str,
+    ) -> list[ChatMessage] | None:
+        """Persist the user message on the ideation channel and enqueue
+        run_ideation. Returns just the user message — the assistant reply
+        arrives over the WebSocket."""
+        proposal = await self.proposal_repo.get_by_id(proposal_id)
+        if not proposal or str(proposal.agency_id) != str(agency_id):
+            self.error = "Proposal not found"
+            self.status_code = 404
+            return None
+
+        user_msg = await self.msg_repo.create(
+            proposal_id=proposal_id,
+            role=MessageRole.USER.value,
+            message_type=MessageType.TEXT.value,
+            content=content,
+            phase="ideation",
+            channel="ideation",
+        )
+        await self._broadcast_msg(proposal_id, user_msg)
+        await ws_manager.broadcast(str(proposal_id), {"type": "typing", "typing": True})
+
+        # Per-turn idempotency: each user message is a fresh ideation run.
+        await self._enqueue(
+            "run_ideation", proposal_id, idempotency_key=str(user_msg.id),
+        )
+        self.status_code = 201
+        return [user_msg]
 
     async def _handle_template_confirm(
         self,
