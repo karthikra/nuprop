@@ -38,5 +38,11 @@ class ChatMessage(BaseModel):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     extra_data: Mapped[dict] = mapped_column(JSONColumn, default=dict)
     phase: Mapped[str | None] = mapped_column(String(50))
+    channel: Mapped[str] = mapped_column(
+        String(20),
+        default="main",
+        server_default="main",
+        nullable=False,
+    )
 
     proposal = relationship("Proposal", back_populates="chat_messages")
