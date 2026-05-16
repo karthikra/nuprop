@@ -82,34 +82,82 @@ class ConnectorViewModel(ViewModelBase):
     # ── OAuth flow ───────────────────────────────────────────
 
     async def get_auth_url(self, agency_id: UUID) -> str:
+        from app.core.config import get_settings
+        from app.infrastructure.security.oauth_state import issue_state
+
         if not self._gmail.is_configured:
             self.error = "Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET."
             self.status_code = 400
             return ""
-        return self._gmail.get_auth_url(str(agency_id))
+        state = issue_state(
+            agency_id=agency_id,
+            provider="gmail",
+            secret=get_settings().JWT_SECRET_KEY,
+        )
+        return self._gmail.get_auth_url(state)
 
-    async def handle_callback(self, agency_id: UUID, code: str) -> dict:
-        tokens = await self._gmail.exchange_code(code)
-        access_token = tokens["access_token"]
-        refresh_token = tokens.get("refresh_token", "")
+    async def handle_callback(self, agency_id_from_state: UUID, code: str) -> dict:
+        """Caller (route handler) must have already verified the OAuth state
+        token and resolved the agency_id from its payload — do NOT trust the
+        URL/session for agency_id during the callback."""
+        try:
+            tokens = await self._gmail.exchange_code(code)
+        except Exception as exc:
+            logger.exception(
+                "gmail.exchange_code failed",
+                extra={"event": "connector.gmail.exchange_failed"},
+            )
+            self.error = "Google rejected the authorization code"
+            self.status_code = 400
+            return {}
 
-        email = await self._gmail.get_user_email(access_token)
+        access_token = tokens.get("access_token") or ""
+        refresh_token = tokens.get("refresh_token") or ""
+        if not access_token or not refresh_token:
+            logger.warning(
+                "gmail.exchange_code returned without refresh_token",
+                extra={"event": "connector.gmail.missing_refresh_token"},
+            )
+            self.error = (
+                "Google did not return a refresh token. "
+                "Revoke the existing app authorization in your Google account and try again."
+            )
+            self.status_code = 400
+            return {}
 
-        agency = await self.agency_repo.get_by_id(agency_id)
+        try:
+            email = await self._gmail.get_user_email(access_token)
+        except Exception as exc:
+            logger.exception(
+                "gmail.get_user_email failed",
+                extra={"event": "connector.gmail.profile_failed"},
+            )
+            self.error = "Failed to read Google profile"
+            self.status_code = 502
+            return {}
+
+        agency = await self.agency_repo.get_by_id(agency_id_from_state)
         if not agency:
             self.error = "Agency not found"
             self.status_code = 404
+            return {}
+
+        try:
+            encrypted_refresh = self._encrypt(refresh_token)
+        except TokenVaultError:
+            self.error = "Server encryption key is not configured; cannot store credentials"
+            self.status_code = 500
             return {}
 
         settings = dict(agency.settings or {})
         settings["gmail"] = {
             "connected": True,
             "email": email,
-            "refresh_token": self._encrypt(refresh_token),
+            "refresh_token": encrypted_refresh,
             "last_sync": None,
             "email_count": 0,
         }
-        await self.agency_repo.update(agency_id, settings=settings)
+        await self.agency_repo.update(agency_id_from_state, settings=settings)
 
         return {"connected": True, "email": email, "last_sync": None, "email_count": 0}
 
