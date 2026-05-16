@@ -18,10 +18,14 @@ class ChatMessageRepository(BaseRepository[ChatMessage]):
         proposal_id: UUID | str,
         skip: int = 0,
         limit: int = 200,
+        channel: str = "main",
     ) -> list[ChatMessage]:
         stmt = (
             select(ChatMessage)
-            .where(ChatMessage.proposal_id == str(proposal_id))
+            .where(
+                ChatMessage.proposal_id == str(proposal_id),
+                ChatMessage.channel == channel,
+            )
             .order_by(ChatMessage.created_at.asc())
             .offset(skip)
             .limit(limit)

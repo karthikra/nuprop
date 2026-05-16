@@ -80,7 +80,7 @@ class ChatViewModel(ViewModelBase):
             self.error = "Proposal not found"
             self.status_code = 404
             return None
-        return await self.msg_repo.list_by_proposal(proposal_id, skip, limit)
+        return await self.msg_repo.list_by_proposal(proposal_id, skip=skip, limit=limit)
 
     async def send_message(
         self,
