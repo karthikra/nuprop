@@ -195,6 +195,33 @@ async def test_run_ideation_sends_only_ideation_history_to_bedrock(db, monkeypat
     )
 
 
+async def test_run_ideation_propagates_bedrock_errors(db, monkeypatch):
+    """Bedrock failures should bubble out of run_ideation so the worker wrapper
+    can record an error message — the service itself doesn't swallow them."""
+    _, _, proposal = await _make_proposal(db)
+    await ChatMessageRepository(db).create(
+        proposal_id=proposal.id, role="user", message_type="text",
+        content="hi", phase="ideation", channel="ideation",
+    )
+    await db.commit()
+
+    fake_create = AsyncMock(side_effect=RuntimeError("bedrock down"))
+    monkeypatch.setattr(
+        "app.services.ideation_service.get_ai_service",
+        lambda: _StubAI(fake_create),
+    )
+
+    with pytest.raises(RuntimeError, match="bedrock down"):
+        await IdeationService(db, AsyncMock()).run_ideation(proposal.id)
+
+    # No assistant message was persisted on failure.
+    async with async_session_factory() as fresh:
+        msgs = await ChatMessageRepository(fresh).list_by_proposal(
+            proposal.id, channel="ideation",
+        )
+        assert not any(m.role == "assistant" for m in msgs)
+
+
 class _StubAI:
     """Bare-bones stand-in for AIService used by run_ideation."""
 
