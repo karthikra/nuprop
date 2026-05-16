@@ -186,7 +186,51 @@ Deferred to keep the branch tightly scoped to the ideation feature:
 - **Drawer hydration O(n²)** — `useEffect` calls `addMessage` per message on every TanStack refetch; `addMessage` dedupes via `.some()`. For 200-message threads that's 40k comparisons per window-focus. Add a store action that does a single O(n) merge.
 - **Documentation:** the in-repo HANDOFF (this file) is current, but the spec's WS event catalogue should also list the `pipeline_error.phase` values now in use and confirm `message_updated` is channel-aware.
 
-### Option E — Production deploy
+### Option E — Production deploy 🟡 PARTIALLY STAGED (paused 2026-05-16)
+
+Started the deploy run. Got blocked on infra-provisioning decisions; stopped after staging the secrets I could set without third-party signups.
+
+**What's been done on Fly:**
+
+- App `nuprop` exists in `bom` (Mumbai) with the right `fly.toml` (release_command `alembic upgrade head`, app+worker processes, /data volume mounted, force HTTPS, health check on `/api/v1/health`).
+- 4 secrets **staged** (not deployed yet — they'll go live on first `fly deploy`):
+  ```
+  JWT_SECRET_KEY        (freshly generated with `openssl rand -hex 32`)
+  AWS_ACCESS_KEY_ID     (pulled from local ~/.aws — user `karthik`, account 809644065208)
+  AWS_SECRET_ACCESS_KEY
+  AWS_REGION            (ap-northeast-1)
+  ```
+  Verify with `fly secrets list -a nuprop`.
+
+**What's still needed before `fly deploy`:**
+
+- `DATABASE_URL` — user picked **Neon** (free tier, ~3GB, faster sign-up than Supabase). User signs up at https://neon.tech, creates a project, copies the asyncpg URL (`postgresql+asyncpg://<user>:<pw>@<host>/<db>?sslmode=require`). Then `fly secrets set DATABASE_URL=...`. Neon's connection-pooler URL (port 6543) does NOT work with asyncpg's prepared statements — use the **direct** URL.
+- `REDIS_URL` — user paused on this. Fly's Upstash starts at $10/mo (Fixed 250MB) — no free tier on the Fly-managed integration. The alternative is upstash.com direct (free tier: 256MB / 10K commands/day, plenty for ARQ + WS pub/sub). Three paths from here:
+  1. `fly redis create -n nuprop-redis --plan "Fixed 250MB" --region bom` ($10/mo, integrated)
+  2. Sign up at upstash.com (free, slightly outside Fly's network)
+  3. Defer Redis: deploy with no `REDIS_URL` — backend boots, but ARQ workers + WS pub/sub silently fail until it's set. Brief intake + ideation would not function.
+
+**Resume flow (when user is ready):**
+
+```bash
+# 1. Set the two remaining secrets
+fly secrets set -a nuprop \
+  DATABASE_URL="postgresql+asyncpg://...@...neon.tech/nuprop?sslmode=require" \
+  REDIS_URL="redis://default:...@...upstash.io:6379"
+# (the 4 staged secrets auto-deploy alongside these)
+
+# 2. Deploy
+fly deploy -a nuprop --remote-only
+
+# 3. Watch the release_command (alembic) run cleanly + machines come up
+fly logs -a nuprop
+
+# 4. Verify
+curl -s -o /dev/null -w "%{http_code}\n" https://nuprop.fly.dev/api/v1/health
+# → 200
+```
+
+**Then flip the GitHub Actions auto-deploy on:** edit `.github/workflows/deploy.yml`, uncomment the `push: branches: [main]` block, add `FLY_API_TOKEN` to the repo's GitHub Actions secrets (`fly tokens create deploy` outputs one). Every push to main then auto-redeploys.
 
 Same as the previous handoff. `fly.toml` is configured. Secrets not set:
 
