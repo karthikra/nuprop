@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timezone
 from uuid import UUID
@@ -7,7 +8,7 @@ from uuid import UUID
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
+from app.core.errors import ConnectorAuthError, TokenVaultError
 from app.infrastructure.db.models.base import _uuid_default
 from app.infrastructure.db.repositories.agency_repo import AgencyRepository
 from app.infrastructure.db.repositories.client_repo import ClientRepository
@@ -16,16 +17,33 @@ from app.infrastructure.external.gcal_client import GCalClient
 from app.infrastructure.external.gdrive_client import GDriveClient
 from app.infrastructure.external.gmail_client import GmailClient
 from app.infrastructure.external.slack_client import SlackClient
+from app.infrastructure.security.token_vault import TokenVault
 from app.services.ai.email_classifier import EmailClassifier
 from app.viewmodels.shared.viewmodel import ViewModelBase
+
+logger = logging.getLogger(__name__)
 
 FREEMAIL_DOMAINS = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com", "aol.com", "protonmail.com"}
 
 
 class ConnectorViewModel(ViewModelBase):
-    def __init__(self, request: Request, db: AsyncSession):
+    def __init__(
+        self,
+        request: Request,
+        db: AsyncSession,
+        *,
+        gmail_client: GmailClient | None = None,
+        slack_client: SlackClient | None = None,
+        token_vault: TokenVault | None = None,
+    ):
         super().__init__(request, db)
-        self._gmail = GmailClient()
+        self._gmail = gmail_client or GmailClient()
+        self._slack = slack_client or SlackClient()
+        if token_vault is not None:
+            self._vault = token_vault
+        else:
+            from app.core.deps import get_token_vault
+            self._vault = get_token_vault()
         self._agency_repo: AgencyRepository | None = None
         self._client_repo: ClientRepository | None = None
         self._email_repo: EmailIndexRepository | None = None
@@ -51,18 +69,15 @@ class ConnectorViewModel(ViewModelBase):
     # ── Token encryption ─────────────────────────────────────
 
     def _encrypt(self, text: str) -> str:
-        key = get_settings().ENCRYPTION_KEY
-        if not key:
-            return text  # No encryption in dev
-        from cryptography.fernet import Fernet
-        return Fernet(key.encode()).encrypt(text.encode()).decode()
+        """Encrypt via the injected TokenVault. Raises TokenVaultError if the
+        vault is not configured; the route handler converts that to 5xx."""
+        return self._vault.encrypt(text)
 
     def _decrypt(self, text: str) -> str:
-        key = get_settings().ENCRYPTION_KEY
-        if not key:
-            return text
-        from cryptography.fernet import Fernet
-        return Fernet(key.encode()).decrypt(text.encode()).decode()
+        """Decrypt via the injected TokenVault. Raises TokenVaultError on
+        InvalidToken (rotated key / corruption); caller maps that to
+        ConnectorAuthError("needs_reauth")."""
+        return self._vault.decrypt(text)
 
     # ── OAuth flow ───────────────────────────────────────────
 
