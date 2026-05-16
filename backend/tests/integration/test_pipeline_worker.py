@@ -12,22 +12,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from app.infrastructure.db.repositories.agency_repo import AgencyRepository
-from app.infrastructure.db.repositories.client_repo import ClientRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.workers import pipeline as worker
-
-
-async def _make_proposal(db):
-    agency = await AgencyRepository(db).create(name="W Agency", slug="w-agency")
-    client = await ClientRepository(db).create(agency_id=agency.id, name="C", slug="c")
-    proposal = await ProposalRepository(db).create(
-        agency_id=agency.id, client_id=client.id, project_name="W Project",
-        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
-        pipeline_state={"current_phase": "research", "phases_completed": []},
-    )
-    await db.commit()
-    return proposal
 
 
 def _ctx(job_try=1):
@@ -76,8 +62,11 @@ def _patch_research_pipeline(monkeypatch, *, stream_context):
     monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
 
 
-async def test_run_research_task_sets_job_status_and_enqueues_next(db, monkeypatch):
-    proposal = await _make_proposal(db)
+async def test_run_research_task_sets_job_status_and_enqueues_next(db, monkeypatch, make_proposal_db):
+    _, _, proposal = await make_proposal_db(
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
+    )
     pid = str(proposal.id)
 
     body_text = "Acme research summary."
@@ -100,7 +89,7 @@ async def test_run_research_task_sets_job_status_and_enqueues_next(db, monkeypat
     assert ctx["redis"].enqueue_job.await_args.args[0] == "run_benchmarks"
 
 
-async def test_task_marks_failed_and_emits_pipeline_error_on_exception(db, monkeypatch):
+async def test_task_marks_failed_and_emits_pipeline_error_on_exception(db, monkeypatch, make_proposal_db):
     """Any phase exception is terminal: state -> 'failed' + pipeline_error broadcast.
 
     ARQ does NOT auto-retry on a bare ``raise`` (that requires the explicit
@@ -108,7 +97,10 @@ async def test_task_marks_failed_and_emits_pipeline_error_on_exception(db, monke
     records every failure as terminal so the user can re-attempt via
     POST /chat/{id}/retry.
     """
-    proposal = await _make_proposal(db)
+    _, _, proposal = await make_proposal_db(
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
+    )
     pid = str(proposal.id)
 
     class _BrokenStream(_MockStreamContext):

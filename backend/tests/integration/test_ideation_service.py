@@ -8,23 +8,9 @@ import pytest
 
 from app.infrastructure.db.database import async_session_factory
 from app.infrastructure.db.models.chat_message import MessageRole
-from app.infrastructure.db.repositories.agency_repo import AgencyRepository
 from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
-from app.infrastructure.db.repositories.client_repo import ClientRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.services.ideation_service import IdeationService
-
-
-async def _make_proposal(db, *, brief=None):
-    agency = await AgencyRepository(db).create(name="ID Agency", slug="id-agency")
-    client = await ClientRepository(db).create(agency_id=agency.id, name="C", slug="c")
-    proposal = await ProposalRepository(db).create(
-        agency_id=agency.id, client_id=client.id, project_name="Ideation Project",
-        brief=brief or {},
-        pipeline_state={"current_phase": "brief", "phases_completed": []},
-    )
-    await db.commit()
-    return agency, client, proposal
 
 
 def _bedrock_reply(text: str):
@@ -36,8 +22,8 @@ def _bedrock_reply(text: str):
     return response
 
 
-async def test_run_ideation_persists_assistant_msg_on_ideation_channel(db, monkeypatch):
-    _, _, proposal = await _make_proposal(db)
+async def test_run_ideation_persists_assistant_msg_on_ideation_channel(db, monkeypatch, make_proposal_db):
+    _, _, proposal = await make_proposal_db()
     pid = proposal.id
 
     # Seed a user message on the ideation channel so the service has chat history to send.
@@ -71,8 +57,8 @@ async def test_run_ideation_persists_assistant_msg_on_ideation_channel(db, monke
         assert main == []  # default channel is "main"; the ideation msgs don't leak in
 
 
-async def test_run_ideation_passes_cache_control_system_block_to_bedrock(db, monkeypatch):
-    _, _, proposal = await _make_proposal(db, brief={"client": {"name": "Acme"}})
+async def test_run_ideation_passes_cache_control_system_block_to_bedrock(db, monkeypatch, make_proposal_db):
+    _, _, proposal = await make_proposal_db(brief={"client": {"name": "Acme"}}, project_name="Ideation Project")
     await ChatMessageRepository(db).create(
         proposal_id=proposal.id, role="user", message_type="text",
         content="ping", phase="ideation", channel="ideation",
@@ -99,9 +85,9 @@ async def test_run_ideation_passes_cache_control_system_block_to_bedrock(db, mon
     assert kwargs["messages"] == [{"role": "user", "content": "ping"}]
 
 
-async def test_run_ideation_does_not_mutate_proposal_fields(db, monkeypatch):
+async def test_run_ideation_does_not_mutate_proposal_fields(db, monkeypatch, make_proposal_db):
     """The read-only invariant: nothing on ``proposal.*`` changes."""
-    _, _, proposal = await _make_proposal(db, brief={"client": {"name": "Acme"}})
+    _, _, proposal = await make_proposal_db(brief={"client": {"name": "Acme"}})
     pid = proposal.id
     await ChatMessageRepository(db).create(
         proposal_id=pid, role="user", message_type="text",
@@ -126,12 +112,12 @@ async def test_run_ideation_does_not_mutate_proposal_fields(db, monkeypatch):
     assert before == after, "ideation must not mutate proposal fields"
 
 
-async def test_run_ideation_commits_before_broadcasting(db, monkeypatch):
+async def test_run_ideation_commits_before_broadcasting(db, monkeypatch, make_proposal_db):
     """Spy on publish — confirm the assistant row is already visible from a
     fresh session at the moment publish is awaited. Locks in the
     commit-before-broadcast invariant that the whole worker rewrite hinged on.
     """
-    _, _, proposal = await _make_proposal(db)
+    _, _, proposal = await make_proposal_db()
     pid = proposal.id
     await ChatMessageRepository(db).create(
         proposal_id=pid, role="user", message_type="text",
@@ -163,9 +149,9 @@ async def test_run_ideation_commits_before_broadcasting(db, monkeypatch):
     )
 
 
-async def test_run_ideation_sends_only_ideation_history_to_bedrock(db, monkeypatch):
+async def test_run_ideation_sends_only_ideation_history_to_bedrock(db, monkeypatch, make_proposal_db):
     """Main-channel messages must NOT bleed into the ideation context."""
-    _, _, proposal = await _make_proposal(db)
+    _, _, proposal = await make_proposal_db()
     pid = proposal.id
 
     msg_repo = ChatMessageRepository(db)
@@ -195,10 +181,10 @@ async def test_run_ideation_sends_only_ideation_history_to_bedrock(db, monkeypat
     )
 
 
-async def test_run_ideation_propagates_bedrock_errors(db, monkeypatch):
+async def test_run_ideation_propagates_bedrock_errors(db, monkeypatch, make_proposal_db):
     """Bedrock failures should bubble out of run_ideation so the worker wrapper
     can record an error message — the service itself doesn't swallow them."""
-    _, _, proposal = await _make_proposal(db)
+    _, _, proposal = await make_proposal_db()
     await ChatMessageRepository(db).create(
         proposal_id=proposal.id, role="user", message_type="text",
         content="hi", phase="ideation", channel="ideation",

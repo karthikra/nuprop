@@ -13,36 +13,24 @@ from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from tests.conftest import API
 
 
-async def _make_proposal(http, headers):
-    c = (await http.post(f"{API}/clients", headers=headers, json={"name": "Chat Client"})).json()
-    p = (
-        await http.post(
-            f"{API}/proposals",
-            headers=headers,
-            json={"client_id": c["id"], "project_name": "Chat Project"},
-        )
-    ).json()
-    return p
-
-
-async def test_get_messages_empty(client, registered):
-    p = await _make_proposal(client, registered.headers)
+async def test_get_messages_empty(client, registered, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
     resp = await client.get(f"{API}/chat/{p['id']}/messages", headers=registered.headers)
     assert resp.status_code == 200
     assert resp.json() == []
 
 
-async def test_get_messages_cross_agency_404(client, registered, second_agency):
-    p = await _make_proposal(client, registered.headers)
+async def test_get_messages_cross_agency_404(client, registered, second_agency, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
     resp = await client.get(f"{API}/chat/{p['id']}/messages", headers=second_agency.headers)
     assert resp.status_code == 404
 
 
-async def test_send_message_brief_phase_enqueues_analyze_brief(client, registered, arq_pool):
+async def test_send_message_brief_phase_enqueues_analyze_brief(client, registered, arq_pool, make_proposal_api):
     """In the brief phase, send_message persists the user message and enqueues
     the analyze_brief job — it does not run the analyzer inline. The assistant
     reply arrives later via the WebSocket channel (out of scope for this test)."""
-    p = await _make_proposal(client, registered.headers)
+    p = await make_proposal_api(client, registered.headers)
     resp = await client.post(
         f"{API}/chat/{p['id']}/send",
         headers=registered.headers,
@@ -63,10 +51,10 @@ async def test_send_message_brief_phase_enqueues_analyze_brief(client, registere
     assert job_status == {"phase": "analyze_brief", "state": "queued", "error": None}
 
 
-async def test_approve_brief_gate_advances_pipeline(client, registered, seeded_templates):
+async def test_approve_brief_gate_advances_pipeline(client, registered, seeded_templates, make_proposal_api):
     """The brief gate stays synchronous — template matching is a local lookup,
     no LLM/IO involved — so this test exercises the full handler."""
-    p = await _make_proposal(client, registered.headers)
+    p = await make_proposal_api(client, registered.headers)
     resp = await client.post(
         f"{API}/chat/{p['id']}/approve/brief", headers=registered.headers, json={"data": {}}
     )
@@ -78,8 +66,8 @@ async def test_approve_brief_gate_advances_pipeline(client, registered, seeded_t
     assert "brief" in pipeline["phases_completed"]
 
 
-async def test_approve_template_gate_enqueues_research(client, registered, arq_pool, seeded_templates):
-    p = await _make_proposal(client, registered.headers)
+async def test_approve_template_gate_enqueues_research(client, registered, arq_pool, seeded_templates, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
     # advance the proposal to template_confirm via the brief gate
     await client.post(f"{API}/chat/{p['id']}/approve/brief", headers=registered.headers, json={"data": {}})
 
@@ -98,16 +86,16 @@ async def test_approve_template_gate_enqueues_research(client, registered, arq_p
     assert pipeline["job_status"]["state"] == "queued"
 
 
-async def test_approve_unknown_gate_400(client, registered):
-    p = await _make_proposal(client, registered.headers)
+async def test_approve_unknown_gate_400(client, registered, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
     resp = await client.post(
         f"{API}/chat/{p['id']}/approve/bogus-gate", headers=registered.headers, json={"data": {}}
     )
     assert resp.status_code == 400
 
 
-async def test_patch_cost_model_item_recalculates_totals(client, registered, db):
-    p = await _make_proposal(client, registered.headers)
+async def test_patch_cost_model_item_recalculates_totals(client, registered, db, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
 
     # seed a cost model directly on the proposal
     repo = ProposalRepository(db)

@@ -9,23 +9,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.infrastructure.db.database import async_session_factory
-from app.infrastructure.db.repositories.agency_repo import AgencyRepository
 from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
-from app.infrastructure.db.repositories.client_repo import ClientRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.services.pipeline_service import PipelineService
-
-
-async def _make_proposal(db, *, brief=None):
-    agency = await AgencyRepository(db).create(name="RT Agency", slug="rt-agency")
-    client = await ClientRepository(db).create(agency_id=agency.id, name="C", slug="c")
-    proposal = await ProposalRepository(db).create(
-        agency_id=agency.id, client_id=client.id, project_name="RT Project",
-        brief=brief or {"client": {"name": "Acme"}, "project": {"deliverables": []}},
-        pipeline_state={"current_phase": "research", "phases_completed": []},
-    )
-    await db.commit()
-    return proposal
 
 
 def _start(content_block):
@@ -62,8 +48,11 @@ class _MockStreamContext:
         return _gen()
 
 
-async def test_run_research_emits_plan_activity_log_and_findings(db, monkeypatch):
-    proposal = await _make_proposal(db)
+async def test_run_research_emits_plan_activity_log_and_findings(db, monkeypatch, make_proposal_db):
+    _, _, proposal = await make_proposal_db(
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
+    )
 
     # Mock the planner
     monkeypatch.setattr(
@@ -136,8 +125,11 @@ async def test_run_research_emits_plan_activity_log_and_findings(db, monkeypatch
     assert "Acme rebranded in 2024." in refetched.research
 
 
-async def test_run_research_uses_opus_tier(monkeypatch, db):
-    proposal = await _make_proposal(db)
+async def test_run_research_uses_opus_tier(monkeypatch, db, make_proposal_db):
+    _, _, proposal = await make_proposal_db(
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
+    )
     monkeypatch.setattr(
         "app.services.pipeline_service.generate_research_plan",
         AsyncMock(return_value={"queries": [], "rationale": ""}),
@@ -155,9 +147,12 @@ async def test_run_research_uses_opus_tier(monkeypatch, db):
 
 
 async def test_run_research_failure_marks_activity_log_failed_and_does_not_create_findings(
-    db, monkeypatch,
+    db, monkeypatch, make_proposal_db,
 ):
-    proposal = await _make_proposal(db)
+    _, _, proposal = await make_proposal_db(
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
+    )
     monkeypatch.setattr(
         "app.services.pipeline_service.generate_research_plan",
         AsyncMock(return_value={"queries": [], "rationale": ""}),
@@ -193,12 +188,15 @@ async def test_run_research_failure_marks_activity_log_failed_and_does_not_creat
     assert refetched.research is None
 
 
-async def test_run_research_formats_system_prompt_with_no_remaining_placeholders(db, monkeypatch):
+async def test_run_research_formats_system_prompt_with_no_remaining_placeholders(db, monkeypatch, make_proposal_db):
     """Regression: RESEARCH_SYSTEM is a str.format template with {client_name},
     {max_searches}, {context_section}, {template_section} placeholders. The
     worker must substitute them before sending to Bedrock — otherwise the model
     receives literal curly-brace text in its system prompt."""
-    proposal = await _make_proposal(db)
+    _, _, proposal = await make_proposal_db(
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
+    )
     monkeypatch.setattr(
         "app.services.pipeline_service.generate_research_plan",
         AsyncMock(return_value={"queries": [], "rationale": ""}),
@@ -221,11 +219,11 @@ async def test_run_research_formats_system_prompt_with_no_remaining_placeholders
 
 
 async def test_run_benchmarks_emits_separate_findings_message_with_benchmarks_phase(
-    db, monkeypatch,
+    db, monkeypatch, make_proposal_db,
 ):
-    proposal = await _make_proposal(
-        db,
+    _, _, proposal = await make_proposal_db(
         brief={"client": {"name": "Acme"}, "project": {"deliverables": [{"category": "Logo"}]}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
     )
 
     monkeypatch.setattr(
@@ -279,8 +277,11 @@ async def test_run_benchmarks_emits_separate_findings_message_with_benchmarks_ph
     assert "50k-3 lakh" in findings.content
 
 
-async def test_run_benchmarks_uses_balanced_sonnet_tier(monkeypatch, db):
-    proposal = await _make_proposal(db)
+async def test_run_benchmarks_uses_balanced_sonnet_tier(monkeypatch, db, make_proposal_db):
+    _, _, proposal = await make_proposal_db(
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
+    )
     monkeypatch.setattr(
         "app.services.pipeline_service.generate_benchmarks_plan",
         AsyncMock(return_value={"queries": [], "rationale": ""}),
@@ -297,13 +298,13 @@ async def test_run_benchmarks_uses_balanced_sonnet_tier(monkeypatch, db):
     mock_ai.model_for.assert_called_with(Tier.BALANCED)
 
 
-async def test_run_benchmarks_formats_system_prompt_with_no_remaining_placeholders(db, monkeypatch):
+async def test_run_benchmarks_formats_system_prompt_with_no_remaining_placeholders(db, monkeypatch, make_proposal_db):
     """Regression: BENCHMARK_SYSTEM is a str.format template with
     {max_searches} and {categories_section} placeholders. The worker must
     substitute them before sending to Bedrock."""
-    proposal = await _make_proposal(
-        db,
+    _, _, proposal = await make_proposal_db(
         brief={"client": {"name": "Acme"}, "project": {"deliverables": [{"category": "Logo"}]}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
     )
     monkeypatch.setattr(
         "app.services.pipeline_service.generate_benchmarks_plan",

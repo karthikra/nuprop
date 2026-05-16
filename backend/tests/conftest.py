@@ -36,6 +36,9 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 from app.infrastructure.db.database import Base, async_session_factory, engine  # noqa: E402
 from app.infrastructure.db.models import *  # noqa: E402,F401,F403  — register every model on Base.metadata
 from app.infrastructure.db.models.template import StrategyTemplate  # noqa: E402
+from app.infrastructure.db.repositories.agency_repo import AgencyRepository  # noqa: E402
+from app.infrastructure.db.repositories.client_repo import ClientRepository  # noqa: E402
+from app.infrastructure.db.repositories.proposal_repo import ProposalRepository  # noqa: E402
 from app.infrastructure.external.anthropic_client import AnthropicClient  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -128,6 +131,81 @@ def ws_publish_spy(monkeypatch):
     # IdeationService also imports `publish` by name
     monkeypatch.setattr("app.services.ideation_service.publish", _spy, raising=False)
     return published
+
+
+# ── Proposal factories ───────────────────────────────────────────────────────
+@pytest_asyncio.fixture
+async def make_proposal_db(db):
+    """DB-level factory: creates agency + client + proposal directly via repos.
+
+    Returns an async callable. Each invocation creates a fresh trio in the test
+    DB (unique slug per call so the same test can produce multiple proposals).
+    Returns a ``(agency, client, proposal)`` tuple — unpack to taste.
+
+    ::
+
+        agency, client, proposal = await make_proposal_db()
+        _, _, proposal = await make_proposal_db(brief={"client": {"name": "Acme"}})
+    """
+    counter = {"n": 0}
+
+    async def _make(
+        *,
+        brief: dict | None = None,
+        pipeline_state: dict | None = None,
+        project_name: str = "Test Project",
+    ):
+        counter["n"] += 1
+        n = counter["n"]
+        agency = await AgencyRepository(db).create(name=f"Agency {n}", slug=f"agency-{n}")
+        client = await ClientRepository(db).create(
+            agency_id=agency.id, name=f"Client {n}", slug=f"client-{n}",
+        )
+        proposal = await ProposalRepository(db).create(
+            agency_id=agency.id,
+            client_id=client.id,
+            project_name=project_name,
+            brief=brief if brief is not None else {},
+            pipeline_state=pipeline_state if pipeline_state is not None else {
+                "current_phase": "brief",
+                "phases_completed": [],
+            },
+        )
+        await db.commit()
+        return agency, client, proposal
+
+    return _make
+
+
+@pytest.fixture
+def make_proposal_api():
+    """HTTP-level factory: creates client + proposal via the FastAPI endpoints.
+
+    Returns an async callable. Each invocation does two POSTs (clients + proposals)
+    and returns the proposal dict from the API response. Caller supplies the
+    authenticated httpx client and headers (typically via the ``registered``
+    fixture).
+
+    ::
+
+        proposal = await make_proposal_api(client, registered.headers)
+    """
+    counter = {"n": 0}
+
+    async def _make(http, headers, *, project_name: str = "Test Project"):
+        counter["n"] += 1
+        n = counter["n"]
+        c = (await http.post(
+            f"{API}/clients", headers=headers, json={"name": f"Client {n}"},
+        )).json()
+        p = (await http.post(
+            f"{API}/proposals",
+            headers=headers,
+            json={"client_id": c["id"], "project_name": project_name},
+        )).json()
+        return p
+
+    return _make
 
 
 @pytest_asyncio.fixture

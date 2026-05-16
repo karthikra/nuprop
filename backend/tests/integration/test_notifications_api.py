@@ -9,18 +9,6 @@ from app.infrastructure.db.models.notification import Notification
 from tests.conftest import API
 
 
-async def _make_proposal(http, headers):
-    c = (await http.post(f"{API}/clients", headers=headers, json={"name": "Notif Client"})).json()
-    p = (
-        await http.post(
-            f"{API}/proposals",
-            headers=headers,
-            json={"client_id": c["id"], "project_name": "Notif Project"},
-        )
-    ).json()
-    return p
-
-
 async def _seed_notification(db, agency_id, proposal_id):
     notif = Notification(
         proposal_id=proposal_id,
@@ -51,8 +39,8 @@ async def test_unread_count_zero(client, registered):
     assert resp.json()["count"] == 0
 
 
-async def test_list_shows_seeded_notification(client, registered, db):
-    p = await _make_proposal(client, registered.headers)
+async def test_list_shows_seeded_notification(client, registered, db, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
     await _seed_notification(db, registered.agency_id, p["id"])
     resp = await client.get(f"{API}/notifications", headers=registered.headers)
     data = resp.json()
@@ -61,8 +49,8 @@ async def test_list_shows_seeded_notification(client, registered, db):
     assert data["items"][0]["alert_type"] == "first_view"
 
 
-async def test_mark_notification_read(client, registered, db):
-    p = await _make_proposal(client, registered.headers)
+async def test_mark_notification_read(client, registered, db, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
     notif = await _seed_notification(db, registered.agency_id, p["id"])
     resp = await client.patch(
         f"{API}/notifications/{notif.id}/read", headers=registered.headers
@@ -74,8 +62,8 @@ async def test_mark_notification_read(client, registered, db):
     assert count.json()["count"] == 0
 
 
-async def test_mark_read_cross_agency_404(client, registered, second_agency, db):
-    p = await _make_proposal(client, registered.headers)
+async def test_mark_read_cross_agency_404(client, registered, second_agency, db, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
     notif = await _seed_notification(db, registered.agency_id, p["id"])
     resp = await client.patch(
         f"{API}/notifications/{notif.id}/read", headers=second_agency.headers

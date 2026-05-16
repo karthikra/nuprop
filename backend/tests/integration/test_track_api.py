@@ -11,18 +11,6 @@ from app.infrastructure.db.models.visitor import Visitor
 from tests.conftest import API
 
 
-async def _make_proposal(http, headers):
-    c = (await http.post(f"{API}/clients", headers=headers, json={"name": "Track Client"})).json()
-    p = (
-        await http.post(
-            f"{API}/proposals",
-            headers=headers,
-            json={"client_id": c["id"], "project_name": "Tracked Project"},
-        )
-    ).json()
-    return p
-
-
 async def test_track_empty_body_returns_204(client):
     resp = await client.post(f"{API}/track", content=b"")
     assert resp.status_code == 204
@@ -39,8 +27,8 @@ async def test_track_unknown_proposal_returns_204(client):
     assert resp.status_code == 204
 
 
-async def test_track_page_view_creates_visitor_and_event(client, registered, db):
-    p = await _make_proposal(client, registered.headers)
+async def test_track_page_view_creates_visitor_and_event(client, registered, db, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
 
     events = [{"t": "page_view", "p": p["id"], "sid": "session-1"}]
     resp = await client.post(f"{API}/track", json=events)

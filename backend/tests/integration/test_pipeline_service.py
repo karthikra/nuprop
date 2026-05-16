@@ -6,25 +6,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.infrastructure.db.repositories.agency_repo import AgencyRepository
 from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
-from app.infrastructure.db.repositories.client_repo import ClientRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.services.pipeline_service import PipelineService
-
-
-async def _make_proposal(db, *, brief=None, pipeline_state=None):
-    agency = await AgencyRepository(db).create(name="PS Agency", slug="ps-agency")
-    client = await ClientRepository(db).create(agency_id=agency.id, name="C", slug="c")
-    proposal = await ProposalRepository(db).create(
-        agency_id=agency.id,
-        client_id=client.id,
-        project_name="PS Project",
-        brief=brief or {},
-        pipeline_state=pipeline_state or {"current_phase": "brief", "phases_completed": []},
-    )
-    await db.commit()
-    return agency, client, proposal
 
 
 _merge = PipelineService._merge_preferences_into_config
@@ -74,10 +58,10 @@ def test_merge_preferences_into_config_overlays_user_prefs():
     assert merged["output"]["site_theme"] == "dark"
 
 
-async def test_analyze_brief_persists_completed_brief_before_emitting(db, monkeypatch):
+async def test_analyze_brief_persists_completed_brief_before_emitting(db, monkeypatch, make_proposal_db):
     from app.services.ai.brief_analyzer import BriefAnalysisResult, BriefAnalyzer
 
-    _, _, proposal = await _make_proposal(db)
+    _, _, proposal = await make_proposal_db()
     pid = proposal.id
 
     async def fake_analyze(self, chat_history, current_brief):
@@ -103,11 +87,11 @@ async def test_analyze_brief_persists_completed_brief_before_emitting(db, monkey
     assert emitted, "expected a WebSocket event to be published"
 
 
-async def test_build_cost_model_commits_model_and_creates_message(db):
+async def test_build_cost_model_commits_model_and_creates_message(db, make_proposal_db):
     from app.infrastructure.db.repositories.rate_card_repo import RateCardRepository
 
-    agency, _, proposal = await _make_proposal(
-        db, brief={"project": {"deliverables": [{"category": "logo design", "details": "mark", "quantity": 1}]}}
+    agency, _, proposal = await make_proposal_db(
+        brief={"project": {"deliverables": [{"category": "logo design", "details": "mark", "quantity": 1}]}}
     )
     await RateCardRepository(db).create(
         agency_id=agency.id, version="v1", is_active=True,
@@ -128,11 +112,10 @@ async def test_build_cost_model_commits_model_and_creates_message(db):
         assert any(m.message_type == "cost_model" for m in msgs)
 
 
-async def test_generate_narrative_commits_sections_and_advances_pipeline(db, monkeypatch):
+async def test_generate_narrative_commits_sections_and_advances_pipeline(db, monkeypatch, make_proposal_db):
     from app.services.ai.narrative_generator import NarrativeGenerator
 
-    agency, _, proposal = await _make_proposal(
-        db,
+    agency, _, proposal = await make_proposal_db(
         brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
         pipeline_state={"current_phase": "narrative_generation", "phases_completed": ["research"]},
     )
@@ -163,7 +146,7 @@ async def test_generate_narrative_commits_sections_and_advances_pipeline(db, mon
         assert refetched.pipeline_state["current_phase"] == "narrative_review"
 
 
-async def test_generate_outputs_commits_status_and_advances_to_complete(db, tmp_path, monkeypatch):
+async def test_generate_outputs_commits_status_and_advances_to_complete(db, tmp_path, monkeypatch, make_proposal_db):
     # OUTPUT_DIR is a @computed_field — patch get_settings() in the pipeline module
     # to return a stub whose OUTPUT_DIR points at tmp_path so generated files land there.
     from app.core.config import get_settings as real_get_settings
@@ -180,8 +163,7 @@ async def test_generate_outputs_commits_status_and_advances_to_complete(db, tmp_
         "app.services.pipeline_service.get_settings", lambda: _StubSettings()
     )
 
-    agency, _, proposal = await _make_proposal(
-        db,
+    agency, _, proposal = await make_proposal_db(
         brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
         pipeline_state={"current_phase": "output_generation", "phases_completed": ["research", "narrative_review"]},
     )

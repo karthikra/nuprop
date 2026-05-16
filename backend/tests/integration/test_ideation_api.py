@@ -6,34 +6,11 @@ ideation API; one file per feature keeps the test surface easy to find.
 
 from __future__ import annotations
 
-from app.infrastructure.db.repositories.agency_repo import AgencyRepository
 from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
-from app.infrastructure.db.repositories.client_repo import ClientRepository
-from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 
 
-async def _make_proposal(db):
-    agency = await AgencyRepository(db).create(name="ID Agency", slug="id-agency")
-    client = await ClientRepository(db).create(agency_id=agency.id, name="C", slug="c")
-    proposal = await ProposalRepository(db).create(
-        agency_id=agency.id, client_id=client.id, project_name="P",
-        brief={}, pipeline_state={"current_phase": "brief", "phases_completed": []},
-    )
-    await db.commit()
-    return proposal
-
-
-async def _client_proposal_via_api(http, headers):
-    c = (await http.post("/api/v1/clients", headers=headers, json={"name": "Ideation Client"})).json()
-    p = (await http.post(
-        "/api/v1/proposals", headers=headers,
-        json={"client_id": c["id"], "project_name": "Ideation Project"},
-    )).json()
-    return p
-
-
-async def test_list_by_proposal_filters_by_channel(db):
-    proposal = await _make_proposal(db)
+async def test_list_by_proposal_filters_by_channel(db, make_proposal_db):
+    _, _, proposal = await make_proposal_db()
     msg_repo = ChatMessageRepository(db)
 
     await msg_repo.create(
@@ -53,8 +30,8 @@ async def test_list_by_proposal_filters_by_channel(db):
     assert [m.content for m in ideation] == ["ideation msg"]
 
 
-async def test_get_ideation_messages_returns_empty_for_new_proposal(client, registered):
-    p = await _client_proposal_via_api(client, registered.headers)
+async def test_get_ideation_messages_returns_empty_for_new_proposal(client, registered, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
     resp = await client.get(
         f"/api/v1/chat/{p['id']}/ideation/messages",
         headers=registered.headers,
@@ -63,8 +40,8 @@ async def test_get_ideation_messages_returns_empty_for_new_proposal(client, regi
     assert resp.json() == []
 
 
-async def test_get_ideation_messages_cross_agency_returns_404(client, registered, second_agency):
-    p = await _client_proposal_via_api(client, registered.headers)
+async def test_get_ideation_messages_cross_agency_returns_404(client, registered, second_agency, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
     resp = await client.get(
         f"/api/v1/chat/{p['id']}/ideation/messages",
         headers=second_agency.headers,
@@ -72,8 +49,8 @@ async def test_get_ideation_messages_cross_agency_returns_404(client, registered
     assert resp.status_code == 404
 
 
-async def test_send_ideation_cross_agency_returns_404(client, registered, second_agency):
-    p = await _client_proposal_via_api(client, registered.headers)
+async def test_send_ideation_cross_agency_returns_404(client, registered, second_agency, make_proposal_api):
+    p = await make_proposal_api(client, registered.headers)
     resp = await client.post(
         f"/api/v1/chat/{p['id']}/ideation/send",
         headers=second_agency.headers,
@@ -83,9 +60,9 @@ async def test_send_ideation_cross_agency_returns_404(client, registered, second
 
 
 async def test_send_ideation_enqueues_and_returns_only_the_user_message(
-    client, registered, arq_pool,
+    client, registered, arq_pool, make_proposal_api,
 ):
-    p = await _client_proposal_via_api(client, registered.headers)
+    p = await make_proposal_api(client, registered.headers)
     resp = await client.post(
         f"/api/v1/chat/{p['id']}/ideation/send",
         headers=registered.headers,
@@ -104,10 +81,10 @@ async def test_send_ideation_enqueues_and_returns_only_the_user_message(
 
 
 async def test_ideation_thread_is_separate_from_the_main_thread(
-    client, registered, arq_pool,
+    client, registered, arq_pool, make_proposal_api,
 ):
     """Posting on the ideation channel must NOT pollute the main thread."""
-    p = await _client_proposal_via_api(client, registered.headers)
+    p = await make_proposal_api(client, registered.headers)
 
     await client.post(
         f"/api/v1/chat/{p['id']}/ideation/send",

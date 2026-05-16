@@ -7,31 +7,17 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.infrastructure.db.database import async_session_factory
-from app.infrastructure.db.repositories.agency_repo import AgencyRepository
 from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
-from app.infrastructure.db.repositories.client_repo import ClientRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.workers import pipeline as worker
-
-
-async def _make_proposal(db):
-    agency = await AgencyRepository(db).create(name="IW Agency", slug="iw-agency")
-    client = await ClientRepository(db).create(agency_id=agency.id, name="C", slug="c")
-    proposal = await ProposalRepository(db).create(
-        agency_id=agency.id, client_id=client.id, project_name="IW Project",
-        brief={},
-        pipeline_state={"current_phase": "brief", "phases_completed": []},
-    )
-    await db.commit()
-    return proposal
 
 
 def _ctx():
     return {"redis": AsyncMock(), "job_try": 1}
 
 
-async def test_run_ideation_task_does_not_touch_pipeline_state(db, monkeypatch):
-    proposal = await _make_proposal(db)
+async def test_run_ideation_task_does_not_touch_pipeline_state(db, monkeypatch, make_proposal_db):
+    _, _, proposal = await make_proposal_db()
     pid = str(proposal.id)
     pipeline_state_before = dict(proposal.pipeline_state)
 
@@ -52,8 +38,8 @@ async def test_run_ideation_task_does_not_touch_pipeline_state(db, monkeypatch):
     )
 
 
-async def test_run_ideation_task_records_error_message_on_failure(db, monkeypatch):
-    proposal = await _make_proposal(db)
+async def test_run_ideation_task_records_error_message_on_failure(db, monkeypatch, make_proposal_db):
+    _, _, proposal = await make_proposal_db()
     pid = str(proposal.id)
     pipeline_state_before = dict(proposal.pipeline_state)
 
