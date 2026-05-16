@@ -42,11 +42,13 @@ export const useChatStore = create<ChatState>((set) => ({
 
   updateMessage: (msg) =>
     set((state) => {
-      const idx = state.messages.findIndex((m) => m.id === msg.id)
+      const target = msg.channel === 'ideation' ? 'ideationMessages' : 'messages'
+      const arr = state[target] as ChatMessage[]
+      const idx = arr.findIndex((m) => m.id === msg.id)
       if (idx < 0) return {}
-      const next = [...state.messages]
+      const next = [...arr]
       next[idx] = msg
-      return { messages: next }
+      return { [target]: next } as Partial<ChatState>
     }),
 
   setPipelinePhase: (phase) => set({ pipelinePhase: phase }),

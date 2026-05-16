@@ -100,6 +100,14 @@ describe('chat-store', () => {
 describe('chat-store channel routing', () => {
   beforeEach(() => useChatStore.getState().reset())
 
+  function mainMsg(id: string, overrides: Partial<ChatMessage> = {}): ChatMessage {
+    return msg(id, { channel: 'main', ...overrides })
+  }
+
+  function ideationMsg(id: string, overrides: Partial<ChatMessage> = {}): ChatMessage {
+    return msg(id, { channel: 'ideation', ...overrides })
+  }
+
   it('addMessage with channel=main lands in messages, not ideationMessages', () => {
     useChatStore.getState().addMessage(msg('m1', { channel: 'main' }))
     expect(useChatStore.getState().messages.map(m => m.id)).toEqual(['m1'])
@@ -118,5 +126,21 @@ describe('chat-store channel routing', () => {
     useChatStore.getState().addMessage(msg('m1', { channel: 'ideation' }))
     expect(useChatStore.getState().messages.length).toBe(1)
     expect(useChatStore.getState().ideationMessages.length).toBe(1)
+  })
+
+  it('updateMessage routes by channel — ideation msg updates ideationMessages, not messages', () => {
+    useChatStore.getState().addMessage(ideationMsg('i1'))
+    const updated = { ...ideationMsg('i1'), content: 'updated' }
+    useChatStore.getState().updateMessage(updated)
+    expect(useChatStore.getState().ideationMessages[0].content).toBe('updated')
+    expect(useChatStore.getState().messages).toEqual([])
+  })
+
+  it('updateMessage on a main-channel message still updates messages', () => {
+    useChatStore.getState().addMessage(mainMsg('m1'))
+    const updated = { ...mainMsg('m1'), content: 'updated main' }
+    useChatStore.getState().updateMessage(updated)
+    expect(useChatStore.getState().messages[0].content).toBe('updated main')
+    expect(useChatStore.getState().ideationMessages).toEqual([])
   })
 })
