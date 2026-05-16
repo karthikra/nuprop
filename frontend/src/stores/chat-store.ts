@@ -3,6 +3,7 @@ import type { ChatMessage, ProgressItem } from '../types/proposal'
 
 interface ChatState {
   messages: ChatMessage[]
+  ideationMessages: ChatMessage[]
   pipelinePhase: string
   isConnected: boolean
   isSending: boolean
@@ -22,6 +23,7 @@ interface ChatState {
 
 export const useChatStore = create<ChatState>((set) => ({
   messages: [],
+  ideationMessages: [],
   pipelinePhase: 'brief',
   isConnected: false,
   isSending: false,
@@ -32,8 +34,10 @@ export const useChatStore = create<ChatState>((set) => ({
 
   addMessage: (msg) =>
     set((state) => {
-      if (state.messages.some((m) => m.id === msg.id)) return state
-      return { messages: [...state.messages, msg] }
+      const target = msg.channel === 'ideation' ? 'ideationMessages' : 'messages'
+      const existing = state[target as keyof ChatState] as ChatMessage[]
+      if (existing.some((m) => m.id === msg.id)) return {}
+      return { [target]: [...existing, msg] } as Partial<ChatState>
     }),
 
   updateMessage: (msg) =>
@@ -62,7 +66,7 @@ export const useChatStore = create<ChatState>((set) => ({
     }),
 
   reset: () => set({
-    messages: [], pipelinePhase: 'brief', isConnected: false,
+    messages: [], ideationMessages: [], pipelinePhase: 'brief', isConnected: false,
     isSending: false, isTyping: false, progress: [],
   }),
 }))

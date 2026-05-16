@@ -96,3 +96,27 @@ describe('chat-store', () => {
     expect(useChatStore.getState().messages[0].content).toBe('orig')
   })
 })
+
+describe('chat-store channel routing', () => {
+  beforeEach(() => useChatStore.getState().reset())
+
+  it('addMessage with channel=main lands in messages, not ideationMessages', () => {
+    useChatStore.getState().addMessage(msg('m1', { channel: 'main' }))
+    expect(useChatStore.getState().messages.map(m => m.id)).toEqual(['m1'])
+    expect(useChatStore.getState().ideationMessages).toEqual([])
+  })
+
+  it('addMessage with channel=ideation lands in ideationMessages, not messages', () => {
+    useChatStore.getState().addMessage(msg('i1', { channel: 'ideation' }))
+    expect(useChatStore.getState().ideationMessages.map(m => m.id)).toEqual(['i1'])
+    expect(useChatStore.getState().messages).toEqual([])
+  })
+
+  it('dedupes by id within each channel independently', () => {
+    useChatStore.getState().addMessage(msg('m1', { channel: 'main' }))
+    useChatStore.getState().addMessage(msg('m1', { channel: 'main' }))
+    useChatStore.getState().addMessage(msg('m1', { channel: 'ideation' }))
+    expect(useChatStore.getState().messages.length).toBe(1)
+    expect(useChatStore.getState().ideationMessages.length).toBe(1)
+  })
+})
