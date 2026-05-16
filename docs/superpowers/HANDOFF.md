@@ -19,7 +19,8 @@ What landed:
 
 **Outstanding immediate work for the next session:**
 
-- **Task 17 — live docker smoke test.** Not blocking — feature is merged to main and pushed. Manual UI verification: `docker compose up --build -d`, register, create proposal, click the Ideate button in the header, drive a thread. Plan's Task 17 has the explicit checklist.
+- **Task 17 docker smoke test ✅** passed — drove a real two-turn Bedrock conversation end-to-end in the browser, confirmed channel isolation in DB + API, confirmed the read-only invariant on `pipeline_state`, and confirmed the no-typing-leak fix from `91bb135`. Details under "What's queued / Option A" below. The forced-failure path was NOT exercised live (worker AWS mount is read-only) — unit coverage is comprehensive.
+- **Two pre-existing register-flow bugs surfaced during the smoke test** (frontend, not in ideation): `/register` posts `name` instead of `full_name` (422), and the frontend crashes with React error #31 when rendering the resulting Pydantic validation error. See Option C below.
 - **Loose ends on main's working tree** (untouched throughout this session, both from a prior session): uncommitted `backend/app/services/ai/brief_analyzer.py` (Haiku-tier switch — 10-line change) and untracked `.github/workflows/fly-deploy.yml` (18 lines, looks like an early CI deploy attempt). Decide commit / revert / amend.
 - **Production:** `fly.toml` still needs AWS secrets set via `fly secrets set` before a real deploy can complete (see "Deployment" below). Unchanged from the previous session.
 
@@ -135,32 +136,38 @@ After this incident, every subsequent frontend-task subagent prompt got a defens
 
 ## What's queued for the next session
 
-### Option A — Task 17 live docker smoke test
+### Option A — Task 17 live docker smoke test ✅ COMPLETED 2026-05-16
 
-Plan's checklist (`docs/superpowers/plans/2026-05-15-ideation-side-channel.md`, Task 17). In short:
+Ran via `docker compose up --build -d` + Playwright. Stack came up clean, migration `02_ideation_channel` applied, worker registered all 7 functions including `run_ideation`. Drove a real Bedrock round-trip end-to-end:
 
-```bash
-cd /Users/karthikramesh/Developer/nuprop
-docker compose up --build -d
-# wait: curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/api/v1/health  → 200
-# browser → register → create proposal → click "💡 Ideate" in header
-```
+- Drawer renders correctly (40vw right slide, empty state with 4 suggestions, `role="dialog"` + `aria-modal="true"`).
+- URL hash sync works both ways (open → `#ideate`, refresh-with-`#ideate` reopens, close clears).
+- Suggestion click populates the input without auto-sending.
+- Two-turn conversation against Sonnet 4.6 — first turn 6.55s, second 7.30s. Both replies substantive and grounded in the empty-brief context (proves `_build_ideation_system_prompt` reaches Bedrock correctly).
+- **Critical-fix verification:** no typing leak into the main chat panel during ideation processing (`mainHasTyping: false` while the drawer was awaiting).
+- Channel isolation at both DB level (all 4 rows `channel="ideation"`, main has 0) and API level (`GET /chat/{id}/messages` → `[]`; `GET /chat/{id}/ideation/messages` → 4).
+- Read-only invariant: `pipeline_state.current_phase` still `"brief"`, `proposal.brief` still `{}` after both turns.
+- Per-turn idempotency: worker logs show two distinct `run_ideation:<user_msg_id>` job IDs.
 
-Things to verify during the smoke test:
-- The drawer slides in from the right (40vw, capped at 560px on desktop).
-- Empty state shows 4 clickable suggestions; clicking one inserts text into the input (does NOT auto-send).
-- After sending: user bubble appears immediately in the drawer; Send button disables while pending; ~5-10s later the assistant reply arrives via WS.
-- **Critically:** the MAIN chat panel shows NO "AI is thinking..." while the ideation drawer is processing (the regression Task 91bb135 fixed).
-- If you force a failure (kill Bedrock creds), an amber error block appears INLINE in the drawer thread within seconds — not on refresh (this is the real-time delivery Task 91bb135 fixed).
-- Refresh with `#ideate` in the URL — the drawer auto-reopens.
-- `pipeline_state.current_phase` on the proposal is unchanged after ideation turns (the read-only invariant — verify in psql).
+**Skipped:** forced-failure path. The worker container's `/root/.aws` mount is read-only, so triggering a Bedrock auth failure would require a worker restart with a bad `AWS_PROFILE` override. Unit coverage for that path is comprehensive (`test_run_ideation_propagates_bedrock_errors`, `test_run_ideation_task_records_error_message_on_failure`, plus the `new_message`-publish-on-error assertion added in `91bb135`). Worth a one-off live test eventually but low-priority.
+
+**Two pre-existing frontend bugs surfaced during the smoke test** (unrelated to ideation — see Option C below).
 
 ### Option B — Cleanup pass on the loose ends
 
 1. `backend/app/services/ai/brief_analyzer.py` — uncommitted Haiku-tier switch (10 lines, looks intentional and reasonable). Either commit as `feat: switch brief_analyzer to Haiku 4.5 for chat felt-latency` or revert if you decide Sonnet is the right tier for brief intake.
 2. `.github/workflows/fly-deploy.yml` — untracked, 18 lines. Inspect; either commit as a deploy automation or delete.
 
-### Option C — Follow-ups flagged by reviewers during this session
+### Option C — Frontend register-flow bugs (surfaced during smoke test)
+
+Both pre-existing, unrelated to ideation. The login flow is fine — these only affect first-time registration of new agencies, which is why they haven't been noticed sooner.
+
+1. **`/register` sends `name` instead of `full_name`** — backend `RegisterRequest` requires `full_name`; the form's submit handler in `frontend/src/pages/register.tsx` (or wherever the mutation is) posts `{name, agency_name, email, password}`. Backend returns 422 every time. Fix: rename the form's field (and any related state/zod schema) from `name` → `full_name`.
+2. **React error #31 on the 422 response** — when registration 422s, the frontend tries to render the Pydantic validation-error object (`{detail: [{type, loc, msg, input, ctx}, ...]}`) as a React child and crashes with `Objects are not valid as a React child`. Need an `error?.response?.data?.detail?.map(d => d.msg).join(', ')` or similar in the error display. Same fix probably needs replicating wherever else API errors are surfaced in the UI.
+
+Bonus context: `@test.local` is also rejected by the email validator (`The part after the @-sign is a special-use or reserved name`). Use `.com` / `.test` / `.example` for test accounts. Not a bug, just a footgun — worth a note in CLAUDE.md or a fixture for smoke tests.
+
+### Option D — Follow-ups flagged by reviewers during this session
 
 Deferred to keep the branch tightly scoped to the ideation feature:
 
@@ -169,7 +176,7 @@ Deferred to keep the branch tightly scoped to the ideation feature:
 - **Drawer hydration O(n²)** — `useEffect` calls `addMessage` per message on every TanStack refetch; `addMessage` dedupes via `.some()`. For 200-message threads that's 40k comparisons per window-focus. Add a store action that does a single O(n) merge.
 - **Documentation:** the in-repo HANDOFF (this file) is current, but the spec's WS event catalogue should also list the `pipeline_error.phase` values now in use and confirm `message_updated` is channel-aware.
 
-### Option D — Production deploy
+### Option E — Production deploy
 
 Same as the previous handoff. `fly.toml` is configured. Secrets not set:
 
@@ -269,6 +276,6 @@ Unchanged structurally from the previous session. Ideation's Alembic migration u
 ## How to resume
 
 1. Read this file end-to-end (~3 min).
-2. `git log --oneline -5`, `git status` — confirm `91bb135` is HEAD and the two loose ends still pending.
+2. `git log --oneline -5`, `git status` — confirm the latest `docs:` commit is HEAD and the two loose ends still pending.
 3. `~/.claude/projects/-Users-karthikramesh-Developer-nuprop/memory/session_handoff_2026_05_16.md` has the same pointer + a quick-verification block.
-4. Ask the user which queued item to pick — A (smoke test), B (loose-ends cleanup), C (review follow-ups), D (production deploy). Default if they want momentum: **A**, since it's the last unverified gap on a freshly-merged feature.
+4. Ask the user which queued item to pick — A (smoke test, ✅ done — only re-run if Bedrock or migration semantics change), B (loose-ends cleanup), C (register-flow bugs), D (review follow-ups), E (production deploy). Default if they want momentum: **C**, since those bugs block any new user from registering through the UI.
