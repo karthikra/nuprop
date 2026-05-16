@@ -11,6 +11,7 @@ function msg(id: string, overrides: Partial<ChatMessage> = {}): ChatMessage {
     content: 'hello',
     extra_data: {},
     phase: null,
+    channel: 'main',
     created_at: '2026-01-01T00:00:00Z',
     ...overrides,
   }

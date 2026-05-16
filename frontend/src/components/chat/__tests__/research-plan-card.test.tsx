@@ -16,7 +16,7 @@ function planMessage(phase: 'research' | 'benchmarks'): ChatMessage {
       ],
       rationale: 'Together these queries cover strategic context and existing agency relationships.',
     },
-    phase, created_at: '2026-01-01T00:00:00Z',
+    phase, channel: 'main', created_at: '2026-01-01T00:00:00Z',
   }
 }
 

@@ -22,7 +22,7 @@ const costModel = {
 function message(extra_data: Record<string, unknown> = { cost_model: costModel, requires_approval: true }): ChatMessage {
   return {
     id: 'm1', proposal_id: 'prop-1', role: 'assistant', message_type: 'cost_model',
-    content: 'cost model', extra_data, phase: 'cost_model_review',
+    content: 'cost model', extra_data, phase: 'cost_model_review', channel: 'main',
     created_at: '2026-01-01T00:00:00Z',
   }
 }

@@ -6,7 +6,7 @@ import type { ChatMessage } from '../../../types/proposal'
 function base(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
     id: 'm1', proposal_id: 'prop-1', role: 'assistant', message_type: 'text',
-    content: 'plain message', extra_data: {}, phase: null,
+    content: 'plain message', extra_data: {}, phase: null, channel: 'main',
     created_at: '2026-01-01T12:30:00Z', ...overrides,
   }
 }

@@ -30,7 +30,7 @@ function briefMessage(): ChatMessage {
         },
       },
     },
-    phase: 'brief', created_at: '2026-01-01T00:00:00Z',
+    phase: 'brief', channel: 'main', created_at: '2026-01-01T00:00:00Z',
   }
 }
 
@@ -42,7 +42,7 @@ function templateMessage(): ChatMessage {
       requires_approval: true, gate_type: 'template',
       template_key: 'brand_identity', confidence: 0.8,
     },
-    phase: 'template_confirm', created_at: '2026-01-01T00:00:00Z',
+    phase: 'template_confirm', channel: 'main', created_at: '2026-01-01T00:00:00Z',
   }
 }
 

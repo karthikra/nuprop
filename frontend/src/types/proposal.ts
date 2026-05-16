@@ -65,6 +65,8 @@ export interface ChatMessage {
   content: string
   extra_data: Record<string, unknown>
   phase: string | null
+  /** "main" (default) or "ideation". Backend always returns one of these. */
+  channel: string
   created_at: string
 }
 
