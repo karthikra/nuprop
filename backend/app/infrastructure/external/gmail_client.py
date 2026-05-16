@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode
@@ -7,6 +8,8 @@ from urllib.parse import urlencode
 import httpx
 
 from app.core.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class GmailClient:
@@ -75,8 +78,11 @@ class GmailClient:
         try:
             async with httpx.AsyncClient() as client:
                 await client.post(self.OAUTH_REVOKE_URL, params={"token": token})
-        except Exception:
-            pass  # Best effort
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "gmail token revoke failed (best-effort)",
+                extra={"event": "connector.gmail.revoke_http_error", "error": str(exc)},
+            )
 
     # ── Gmail Data ───────────────────────────────────────────
 
@@ -124,7 +130,15 @@ class GmailClient:
         date_str = headers.get("date", "")
         try:
             date = parsedate_to_datetime(date_str)
-        except Exception:
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "gmail message date parse failed; defaulting to now()",
+                extra={
+                    "event": "connector.gmail.bad_date",
+                    "raw": date_str[:40],
+                    "error": str(exc),
+                },
+            )
             date = datetime.now()
 
         return {
@@ -156,7 +170,15 @@ class GmailClient:
                 try:
                     msg = await self.get_message(access_token, ref["id"])
                     all_messages.append(msg)
-                except Exception:
+                except (httpx.HTTPError, KeyError) as exc:
+                    logger.warning(
+                        "gmail get_message failed for one ref; skipping",
+                        extra={
+                            "event": "connector.gmail.message_fetch_failed",
+                            "ref_id": ref.get("id"),
+                            "error": str(exc),
+                        },
+                    )
                     continue
 
             if not page_token:
