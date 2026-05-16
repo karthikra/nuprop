@@ -103,10 +103,51 @@ async def generate_outputs(ctx: dict, proposal_id: str) -> None:
     await _run_phase(ctx, "generate_outputs", proposal_id)
 
 
+async def _run_ideation_phase(ctx: dict, proposal_id: str) -> None:
+    """Run an ideation turn. Isolated from the main pipeline:
+
+    * Does NOT update ``proposal.pipeline_state`` — ideation has no job_status.
+    * On failure, writes a single error message to the ideation channel and
+      returns cleanly (ARQ marks the job done). The user re-prompts to retry.
+    """
+    from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
+    from app.services.ideation_service import IdeationService
+
+    try:
+        async with async_session_factory() as session:
+            await IdeationService(session, ctx["redis"]).run_ideation(proposal_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("ideation phase failed for %s", proposal_id)
+        async with async_session_factory() as session:
+            await ChatMessageRepository(session).create(
+                proposal_id=proposal_id,
+                role="system",
+                message_type="text",
+                content="Couldn't reach Bedrock. Send another message to try again.",
+                extra_data={"kind": "error", "error": str(exc)},
+                phase="ideation",
+                channel="ideation",
+            )
+            await session.commit()
+        await publish(ctx["redis"], proposal_id, {
+            "type": "pipeline_error",
+            "phase": "ideation",
+            "error": str(exc),
+        })
+
+
+async def run_ideation(ctx: dict, proposal_id: str) -> None:
+    # Thin wrapper mirroring the main pipeline's pattern (function name == ARQ task name).
+    # Actual logic lives in `_run_ideation_phase` so the try/except boundary is
+    # visually parallel to `_run_phase` for the main pipeline tasks.
+    await _run_ideation_phase(ctx, proposal_id)
+
+
 class WorkerSettings:
     functions = [
         analyze_brief, run_research, run_benchmarks,
         build_cost_model, generate_narrative, generate_outputs,
+        run_ideation,                                  # NEW
     ]
     redis_settings = get_redis_settings()
     max_tries = ARQ_MAX_TRIES
