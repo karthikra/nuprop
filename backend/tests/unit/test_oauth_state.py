@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
+import hashlib
+import hmac
 import json
 import time
 from uuid import uuid4
@@ -108,3 +109,75 @@ async def test_verify_emits_log_on_security_event(caplog):
         with pytest.raises(OAuthStateError):
             await verify_state(token=token, expected_provider="gmail", secret=SECRET, nonce_store=store)
     assert any("provider_mismatch" in rec.message or "oauth_state" in rec.message for rec in caplog.records)
+
+
+async def test_verify_rejects_non_numeric_exp():
+    """C1: a token with non-numeric exp must raise OAuthStateError(malformed),
+    NOT a raw ValueError. Constructed by hand to bypass issue_state."""
+    payload = {
+        "agency_id": str(uuid4()),
+        "provider": "gmail",
+        "nonce": "test-nonce-1234",
+        "iat": int(time.time()),
+        "exp": "not-a-number",
+    }
+    body_bytes = json.dumps(payload, separators=(",", ":")).encode()
+    body_b64 = base64.urlsafe_b64encode(body_bytes).rstrip(b"=").decode()
+    sig = base64.urlsafe_b64encode(
+        hmac.new(SECRET.encode(), body_bytes, hashlib.sha256).digest()
+    ).rstrip(b"=").decode()
+    token = f"{body_b64}.{sig}"
+
+    store = InMemoryNonceStore()
+    with pytest.raises(OAuthStateError) as exc_info:
+        await verify_state(token=token, expected_provider="gmail", secret=SECRET, nonce_store=store)
+    assert exc_info.value.code == "malformed"
+
+
+async def test_verify_rejects_malformed_agency_id_without_burning_nonce():
+    """C2: when agency_id parse fails, the nonce slot must NOT have been
+    consumed — proving that the next call (with a properly-formed token
+    re-using the same nonce) would still succeed if it weren't already burned.
+    The simpler assertion: the store has NOT recorded the nonce."""
+    payload = {
+        "agency_id": "not-a-uuid",
+        "provider": "gmail",
+        "nonce": "test-nonce-for-c2",
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 600,
+    }
+    body_bytes = json.dumps(payload, separators=(",", ":")).encode()
+    body_b64 = base64.urlsafe_b64encode(body_bytes).rstrip(b"=").decode()
+    sig = base64.urlsafe_b64encode(
+        hmac.new(SECRET.encode(), body_bytes, hashlib.sha256).digest()
+    ).rstrip(b"=").decode()
+    token = f"{body_b64}.{sig}"
+
+    store = InMemoryNonceStore()
+    with pytest.raises(OAuthStateError) as exc_info:
+        await verify_state(token=token, expected_provider="gmail", secret=SECRET, nonce_store=store)
+    assert exc_info.value.code == "malformed"
+    # And the nonce was NOT consumed
+    assert "test-nonce-for-c2" not in store._seen  # noqa: SLF001 — verifying invariant
+
+
+async def test_verify_rejects_missing_nonce():
+    """I1: a token with HMAC-valid payload but no nonce field must raise malformed."""
+    payload = {
+        "agency_id": str(uuid4()),
+        "provider": "gmail",
+        # nonce intentionally omitted
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 600,
+    }
+    body_bytes = json.dumps(payload, separators=(",", ":")).encode()
+    body_b64 = base64.urlsafe_b64encode(body_bytes).rstrip(b"=").decode()
+    sig = base64.urlsafe_b64encode(
+        hmac.new(SECRET.encode(), body_bytes, hashlib.sha256).digest()
+    ).rstrip(b"=").decode()
+    token = f"{body_b64}.{sig}"
+
+    store = InMemoryNonceStore()
+    with pytest.raises(OAuthStateError) as exc_info:
+        await verify_state(token=token, expected_provider="gmail", secret=SECRET, nonce_store=store)
+    assert exc_info.value.code == "malformed"

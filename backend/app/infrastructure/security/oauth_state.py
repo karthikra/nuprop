@@ -105,7 +105,7 @@ def issue_state(
 ) -> str:
     """Issue a signed state token for the given agency_id + provider.
     `ttl_seconds` is the validity window from `iat`. A 16-byte URL-safe nonce
-    is included; the caller must check it against a NonceStore on verify."""
+    is embedded and checked automatically by `verify_state`."""
     iat = int(time.time())
     payload = {
         "agency_id": str(agency_id),
@@ -163,8 +163,20 @@ async def verify_state(
         )
         raise OAuthStateError(code="signature_mismatch", message="HMAC verification failed")
 
-    # Expiry
-    if int(payload.get("exp", 0)) < int(time.time()):
+    # Expiry (C1: validate exp is numeric before use)
+    try:
+        exp = int(payload["exp"])
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning(
+            "oauth_state.verify rejected payload with invalid exp field",
+            extra={"event": "security.oauth_state.malformed"},
+        )
+        raise OAuthStateError(
+            code="malformed",
+            message="state payload has invalid exp field",
+            cause=exc,
+        ) from exc
+    if exp < int(time.time()):
         logger.warning(
             "oauth_state.verify rejected expired token",
             extra={"event": "security.oauth_state.expired"},
@@ -186,9 +198,30 @@ async def verify_state(
             message=f"state was issued for {payload.get('provider')!r}, not {expected_provider!r}",
         )
 
-    # Replay
-    nonce = payload.get("nonce", "")
-    ttl_remaining = max(60, int(payload.get("exp", 0)) - int(time.time()))
+    # Parse agency_id BEFORE consuming the nonce — failure must not burn the slot (C2).
+    try:
+        agency_id = UUID(payload["agency_id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning(
+            "oauth_state.verify rejected payload with invalid agency_id",
+            extra={"event": "security.oauth_state.malformed"},
+        )
+        raise OAuthStateError(
+            code="malformed",
+            message="state payload has invalid agency_id",
+            cause=exc,
+        ) from exc
+
+    # Replay (this consumes the nonce — only do it after all parse failures) (I1)
+    nonce = payload.get("nonce")
+    if not nonce:
+        logger.warning(
+            "oauth_state.verify rejected payload missing nonce",
+            extra={"event": "security.oauth_state.malformed"},
+        )
+        raise OAuthStateError(code="malformed", message="state payload missing nonce field")
+
+    ttl_remaining = max(60, exp - int(time.time()))
     if not await nonce_store.mark_seen(nonce, ttl_seconds=ttl_remaining):
         logger.warning(
             "oauth_state.verify rejected replayed nonce",
@@ -196,4 +229,4 @@ async def verify_state(
         )
         raise OAuthStateError(code="replayed", message="state token nonce has already been used")
 
-    return UUID(payload["agency_id"])
+    return agency_id
