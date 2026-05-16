@@ -220,56 +220,78 @@ class ConnectorViewModel(ViewModelBase):
             self.status_code = 400
             return {}
 
-        refresh_token = self._decrypt(gmail["refresh_token"])
-        access_token = await self._gmail.refresh_access_token(refresh_token)
+        try:
+            refresh_token = self._decrypt(gmail["refresh_token"])
+        except TokenVaultError:
+            self.error = "Stored Gmail credentials could not be decrypted; please reconnect"
+            self.status_code = 401
+            return {}
 
-        # Get client domains
+        try:
+            access_token = await self._gmail.refresh_access_token(refresh_token)
+        except Exception:
+            logger.exception(
+                "gmail.refresh_access_token failed",
+                extra={"event": "connector.gmail.refresh_failed"},
+            )
+            self.error = "Failed to refresh Google access token; please reconnect"
+            self.status_code = 401
+            return {}
+
         clients = await self.client_repo.search(agency_id, limit=500)
         domain_map = self._extract_domains(clients)
         if not domain_map:
             return {"new_emails": 0, "total_emails": 0, "domains_synced": [], "duration_seconds": 0}
 
-        # Parse last_sync
-        since = None
-        if gmail.get("last_sync"):
-            try:
-                since = datetime.fromisoformat(str(gmail["last_sync"]))
-            except ValueError:
-                logger.warning(
-                    "last_sync ISO parse failed; running full sync",
-                    extra={
-                        "event": "connector.gmail.bad_last_sync_iso",
-                        "value": str(gmail["last_sync"]),
-                    },
-                )
-
+        per_domain_watermark: dict[str, str] = dict(
+            gmail.get("last_sync_per_domain") or {}
+        )
         classifier = EmailClassifier()
         total_new = 0
-        synced_domains = []
+        synced_domains: list[str] = []
 
         for domain, client_name in domain_map.items():
+            # Per-domain `since` from the watermark (falls back to None)
+            since: datetime | None = None
+            iso = per_domain_watermark.get(domain)
+            if iso:
+                try:
+                    since = datetime.fromisoformat(iso)
+                except ValueError:
+                    logger.warning(
+                        "per-domain last_sync ISO parse failed; running full sync for domain",
+                        extra={
+                            "event": "connector.gmail.bad_per_domain_iso",
+                            "domain": domain,
+                            "value": iso,
+                        },
+                    )
+
             try:
-                messages = await self._gmail.fetch_messages_for_domain(access_token, domain, since, limit=100)
+                messages = await self._gmail.fetch_messages_for_domain(
+                    access_token, domain, since, limit=100,
+                )
                 if not messages:
                     continue
 
-                # Filter out already-indexed
                 msg_ids = [m["id"] for m in messages]
                 existing = await self.email_repo.get_existing_message_ids(agency_id, msg_ids)
                 new_messages = [m for m in messages if m["id"] not in existing]
 
                 if not new_messages:
                     synced_domains.append(domain)
+                    # Even with no new messages, advance the per-domain watermark
+                    per_domain_watermark[domain] = datetime.now(timezone.utc).isoformat()
+                    await self._persist_gmail_watermark(agency_id, per_domain_watermark)
                     continue
 
-                # Classify
                 classifications = await classifier.classify_batch(new_messages, concurrency=5)
 
-                # Store
                 now = datetime.now(timezone.utc)
+                rows = []
+                from app.infrastructure.db.models.email_index import EmailIndex
                 for msg, cls in zip(new_messages, classifications):
-                    from app.infrastructure.db.models.email_index import EmailIndex
-                    email = EmailIndex(
+                    rows.append(EmailIndex(
                         id=_uuid_default(),
                         agency_id=str(agency_id),
                         gmail_message_id=msg["id"],
@@ -282,19 +304,28 @@ class ConnectorViewModel(ViewModelBase):
                         summary=cls["summary"],
                         entities=cls["entities"],
                         from_address=msg.get("from", ""),
-                        to_addresses=msg.get("to", "").split(","),
+                        to_addresses=msg.get("to", "").split(",") if msg.get("to") else [],
                         subject=msg.get("subject", ""),
                         date=msg["date"] if isinstance(msg["date"], datetime) else now,
                         has_attachments=msg.get("has_attachments", False),
                         synced_at=now,
-                    )
-                    self._db.add(email)
+                    ))
+
+                # Persist this domain's emails in chunks, committing as we go
+                await self.email_repo.upsert_many(rows, chunk_size=50)
+
+                # Advance per-domain watermark to the newest persisted email's date
+                newest_iso = max(
+                    (m["date"] for m in new_messages if isinstance(m.get("date"), datetime)),
+                    default=now,
+                ).isoformat()
+                per_domain_watermark[domain] = newest_iso
+                await self._persist_gmail_watermark(agency_id, per_domain_watermark)
 
                 total_new += len(new_messages)
                 synced_domains.append(domain)
 
             except ConnectorAuthError:
-                # Token was bad — propagate up so the caller surfaces "reconnect required"
                 raise
             except Exception:
                 logger.exception(
@@ -303,23 +334,43 @@ class ConnectorViewModel(ViewModelBase):
                 )
                 continue
 
-        # Update last_sync
+        # Final refresh of the coarse last_sync + email_count for the UI
+        await self._persist_gmail_watermark(agency_id, per_domain_watermark)
+        email_count = await self.email_repo.count_by_agency(agency_id)
+        agency = await self.agency_repo.get_by_id(agency_id)
         settings = dict(agency.settings or {})
         gmail_settings = dict(settings.get("gmail", {}))
-        gmail_settings["last_sync"] = datetime.now(timezone.utc).isoformat()
-        email_count = await self.email_repo.count_by_agency(agency_id)
         gmail_settings["email_count"] = email_count
         settings["gmail"] = gmail_settings
         await self.agency_repo.update(agency_id, settings=settings)
 
         duration = round(time.time() - start, 1)
-
         return {
             "new_emails": total_new,
             "total_emails": email_count,
             "domains_synced": synced_domains,
             "duration_seconds": duration,
         }
+
+    async def _persist_gmail_watermark(
+        self, agency_id: UUID, per_domain: dict[str, str],
+    ) -> None:
+        """Write the per-domain watermark map AND the coarse last_sync to the
+        agency's settings JSON, committing immediately so a later domain
+        failure cannot revert it."""
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            return
+        settings = dict(agency.settings or {})
+        gmail = dict(settings.get("gmail", {}))
+        gmail["last_sync_per_domain"] = per_domain
+        if per_domain:
+            gmail["last_sync"] = min(per_domain.values())
+        else:
+            gmail["last_sync"] = datetime.now(timezone.utc).isoformat()
+        settings["gmail"] = gmail
+        await self.agency_repo.update(agency_id, settings=settings)
+        await self._db.commit()
 
     def _extract_domains(self, clients: list) -> dict[str, str]:
         """Extract email domains from client contacts. Returns {domain: client_name}."""
