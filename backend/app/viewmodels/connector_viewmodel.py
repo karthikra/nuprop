@@ -187,8 +187,16 @@ class ConnectorViewModel(ViewModelBase):
             try:
                 token = self._decrypt(gmail["refresh_token"])
                 await self._gmail.revoke_token(token)
+            except TokenVaultError:
+                logger.warning(
+                    "skipping Gmail token revoke — stored token could not be decrypted",
+                    extra={"event": "connector.gmail.disconnect_decrypt_failed"},
+                )
             except Exception:
-                pass
+                logger.exception(
+                    "Gmail token revoke failed; clearing local credentials anyway",
+                    extra={"event": "connector.gmail.revoke_failed"},
+                )
 
         settings = dict(agency.settings or {})
         settings.pop("gmail", None)
@@ -226,8 +234,14 @@ class ConnectorViewModel(ViewModelBase):
         if gmail.get("last_sync"):
             try:
                 since = datetime.fromisoformat(str(gmail["last_sync"]))
-            except Exception:
-                pass
+            except ValueError:
+                logger.warning(
+                    "last_sync ISO parse failed; running full sync",
+                    extra={
+                        "event": "connector.gmail.bad_last_sync_iso",
+                        "value": str(gmail["last_sync"]),
+                    },
+                )
 
         classifier = EmailClassifier()
         total_new = 0
@@ -279,8 +293,15 @@ class ConnectorViewModel(ViewModelBase):
                 total_new += len(new_messages)
                 synced_domains.append(domain)
 
+            except ConnectorAuthError:
+                # Token was bad — propagate up so the caller surfaces "reconnect required"
+                raise
             except Exception:
-                continue  # Don't let one domain failure stop the whole sync
+                logger.exception(
+                    "Gmail sync failed for one domain; skipping and continuing",
+                    extra={"event": "connector.gmail.domain_sync_failed", "domain": domain},
+                )
+                continue
 
         # Update last_sync
         settings = dict(agency.settings or {})
@@ -367,6 +388,10 @@ class ConnectorViewModel(ViewModelBase):
                 docs_found += len(docs)
 
             except Exception:
+                logger.exception(
+                    "Drive sync failed for one client; skipping",
+                    extra={"event": "connector.drive.client_sync_failed", "client_id": str(client.id)},
+                )
                 continue
 
         return {"clients_synced": len(clients), "documents_found": docs_found}
@@ -419,6 +444,10 @@ class ConnectorViewModel(ViewModelBase):
                 meetings_found += stats["meeting_count"]
 
             except Exception:
+                logger.exception(
+                    "Calendar sync failed for one client; skipping",
+                    extra={"event": "connector.calendar.client_sync_failed", "client_id": str(client.id)},
+                )
                 continue
 
         return {"clients_synced": len(clients), "meetings_found": meetings_found}
@@ -559,6 +588,10 @@ class ConnectorViewModel(ViewModelBase):
                     mentions_found += len(messages)
 
             except Exception:
+                logger.exception(
+                    "Slack sync failed for one client; skipping",
+                    extra={"event": "connector.slack.client_sync_failed", "client_id": str(client.id)},
+                )
                 continue
 
         # Update last sync
