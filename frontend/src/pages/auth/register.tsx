@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { formatApiError } from '../../api/client'
 import { useAuthStore } from '../../stores/auth-store'
 
 export function RegisterPage() {
@@ -18,8 +19,8 @@ export function RegisterPage() {
     try {
       await register(form.email, form.password, form.fullName, form.agencyName)
       navigate('/onboarding')
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Registration failed')
+    } catch (err) {
+      setError(formatApiError(err, 'Registration failed'))
     }
     setLoading(false)
   }

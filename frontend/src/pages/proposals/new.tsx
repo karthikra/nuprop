@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { formatApiError } from '../../api/client'
 import { useClients } from '../../api/clients'
 import { useCreateProposal } from '../../api/proposals'
 
@@ -21,8 +22,8 @@ export function NewProposalPage() {
         project_name: projectName,
       })
       navigate(`/proposals/${proposal.id}`)
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create proposal')
+    } catch (err) {
+      setError(formatApiError(err, 'Failed to create proposal'))
     }
   }
 
