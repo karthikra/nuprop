@@ -54,3 +54,26 @@ export function useSendMessage() {
     },
   })
 }
+
+export function useIdeationMessages(proposalId: string) {
+  return useQuery({
+    queryKey: ['ideation-messages', proposalId],
+    queryFn: async () => {
+      const { data } = await api.get<ChatMessage[]>(`/chat/${proposalId}/ideation/messages`)
+      return data
+    },
+    enabled: !!proposalId,
+  })
+}
+
+export function useSendIdeationMessage() {
+  return useMutation({
+    mutationFn: async ({ proposalId, content }: { proposalId: string; content: string }) => {
+      const { data } = await api.post<ChatMessage[]>(
+        `/chat/${proposalId}/ideation/send`,
+        { content },
+      )
+      return data
+    },
+  })
+}
