@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -85,8 +88,11 @@ def compute_quality_score(profile: dict) -> ContextQualityScore:
                     if sync_dt >= threshold:
                         score.recency = 25
                         break
-                except Exception:
-                    pass
+                except (ValueError, TypeError) as exc:
+                    logger.debug(
+                        "context_intelligence: bad sync_dt in _sources, skipping recency contribution",
+                        extra={"event": "context_intelligence.bad_sync_dt", "error": str(exc)},
+                    )
 
     # Also check past_work dates
     if score.recency == 0:
@@ -100,8 +106,11 @@ def compute_quality_score(profile: dict) -> ContextQualityScore:
                     if work_dt >= threshold:
                         score.recency = 25
                         break
-                except Exception:
-                    pass
+                except (ValueError, TypeError) as exc:
+                    logger.debug(
+                        "context_intelligence: bad past_work date, skipping",
+                        extra={"event": "context_intelligence.bad_past_work_date", "error": str(exc)},
+                    )
 
     # Volume: count total interactions
     interaction_count = 0

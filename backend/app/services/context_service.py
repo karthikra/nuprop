@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
+
 from app.infrastructure.external.anthropic_client import AnthropicClient
+
+logger = logging.getLogger(__name__)
 
 EXTRACTION_PROMPT = """You are an AI that extracts structured client intelligence from pasted communications (emails, meeting notes, chat messages, or typed context).
 
@@ -225,6 +229,9 @@ ONLY add genuinely new information. Do not repeat what's already in the profile.
             if isinstance(result, dict):
                 return await self.merge_context(context_profile, result)
         except Exception:
-            pass
+            logger.exception(
+                "email enrichment via LLM failed; returning original profile",
+                extra={"event": "context_service.email_enrichment_failed"},
+            )
 
         return context_profile
