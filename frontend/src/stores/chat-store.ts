@@ -8,6 +8,7 @@ interface ChatState {
   isConnected: boolean
   isSending: boolean
   isTyping: boolean
+  isIdeationTyping: boolean
   progress: ProgressItem[]
 
   setMessages: (msgs: ChatMessage[]) => void
@@ -18,6 +19,7 @@ interface ChatState {
   setConnected: (connected: boolean) => void
   setSending: (sending: boolean) => void
   setTyping: (typing: boolean) => void
+  setIdeationTyping: (typing: boolean) => void
   updateProgress: (item: ProgressItem) => void
   reset: () => void
 }
@@ -29,6 +31,7 @@ export const useChatStore = create<ChatState>((set) => ({
   isConnected: false,
   isSending: false,
   isTyping: false,
+  isIdeationTyping: false,
   progress: [],
 
   setMessages: (msgs) => set({ messages: msgs }),
@@ -69,6 +72,7 @@ export const useChatStore = create<ChatState>((set) => ({
   setConnected: (connected) => set({ isConnected: connected }),
   setSending: (sending) => set({ isSending: sending }),
   setTyping: (typing) => set({ isTyping: typing }),
+  setIdeationTyping: (typing) => set({ isIdeationTyping: typing }),
 
   updateProgress: (item) =>
     set((state) => {
@@ -83,6 +87,6 @@ export const useChatStore = create<ChatState>((set) => ({
 
   reset: () => set({
     messages: [], ideationMessages: [], pipelinePhase: 'brief', isConnected: false,
-    isSending: false, isTyping: false, progress: [],
+    isSending: false, isTyping: false, isIdeationTyping: false, progress: [],
   }),
 }))

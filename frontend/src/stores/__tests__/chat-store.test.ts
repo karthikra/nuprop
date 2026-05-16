@@ -184,3 +184,24 @@ describe('chat-store mergeIdeationMessages', () => {
     expect(useChatStore.getState().ideationMessages.map((m) => m.id)).toEqual(['x1', 'i1'])
   })
 })
+
+describe('chat-store isIdeationTyping', () => {
+  beforeEach(() => useChatStore.getState().reset())
+
+  it('setIdeationTyping toggles the flag independently of isTyping', () => {
+    expect(useChatStore.getState().isIdeationTyping).toBe(false)
+    useChatStore.getState().setIdeationTyping(true)
+    expect(useChatStore.getState().isIdeationTyping).toBe(true)
+    expect(useChatStore.getState().isTyping).toBe(false)
+    useChatStore.getState().setIdeationTyping(false)
+    expect(useChatStore.getState().isIdeationTyping).toBe(false)
+  })
+
+  it('reset clears isIdeationTyping along with isTyping', () => {
+    useChatStore.getState().setTyping(true)
+    useChatStore.getState().setIdeationTyping(true)
+    useChatStore.getState().reset()
+    expect(useChatStore.getState().isTyping).toBe(false)
+    expect(useChatStore.getState().isIdeationTyping).toBe(false)
+  })
+})

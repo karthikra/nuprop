@@ -127,6 +127,43 @@ describe('useProposalWebSocket', () => {
     })
   })
 
+  it('routes typing events by channel — ideation lands on isIdeationTyping only', () => {
+    renderHook(() => useProposalWebSocket('prop-1'))
+    act(() =>
+      MockWebSocket.instances[0].emit({ type: 'typing', typing: true, channel: 'ideation' }),
+    )
+    expect(useChatStore.getState().isIdeationTyping).toBe(true)
+    expect(useChatStore.getState().isTyping).toBe(false)
+
+    act(() =>
+      MockWebSocket.instances[0].emit({ type: 'typing', typing: false, channel: 'ideation' }),
+    )
+    expect(useChatStore.getState().isIdeationTyping).toBe(false)
+  })
+
+  it('typing events without a channel default to main (back-compat)', () => {
+    renderHook(() => useProposalWebSocket('prop-1'))
+    act(() => MockWebSocket.instances[0].emit({ type: 'typing', typing: true }))
+    expect(useChatStore.getState().isTyping).toBe(true)
+    expect(useChatStore.getState().isIdeationTyping).toBe(false)
+  })
+
+  it('new_message on the ideation channel clears isIdeationTyping (not isTyping)', () => {
+    renderHook(() => useProposalWebSocket('prop-1'))
+    // Light both indicators first so we can prove the clear is channel-scoped.
+    useChatStore.getState().setTyping(true)
+    useChatStore.getState().setIdeationTyping(true)
+
+    const ideationMsg = {
+      id: 'i1', proposal_id: 'prop-1', role: 'assistant', message_type: 'text',
+      content: 'reply', extra_data: {}, phase: 'ideation', channel: 'ideation',
+      created_at: '2026-01-01T00:00:00Z',
+    }
+    act(() => MockWebSocket.instances[0].emit({ type: 'new_message', message: ideationMsg }))
+    expect(useChatStore.getState().isIdeationTyping).toBe(false)
+    expect(useChatStore.getState().isTyping).toBe(true)  // untouched
+  })
+
   it('routes ideation-channel new_message to ideationMessages, not messages', () => {
     renderHook(() => useProposalWebSocket('prop-1'))
     const message = {

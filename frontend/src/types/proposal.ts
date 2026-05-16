@@ -75,6 +75,9 @@ export interface WSMessage {
   message?: ChatMessage
   phase?: string
   typing?: boolean
+  /** "main" (default) or "ideation". Used to route `typing` events to the
+   * correct slice of the store. Other event types route by `message.channel`. */
+  channel?: string
   agent?: string
   status?: string
   detail?: string

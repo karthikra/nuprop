@@ -8,6 +8,7 @@ export function useProposalWebSocket(proposalId: string | undefined) {
   const setPipelinePhase = useChatStore((s) => s.setPipelinePhase)
   const setConnected = useChatStore((s) => s.setConnected)
   const setTyping = useChatStore((s) => s.setTyping)
+  const setIdeationTyping = useChatStore((s) => s.setIdeationTyping)
   const updateProgress = useChatStore((s) => s.updateProgress)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -46,13 +47,25 @@ export function useProposalWebSocket(proposalId: string | undefined) {
           const data: WSMessage = JSON.parse(event.data)
           if (data.type === 'new_message' && data.message) {
             addMessage(data.message)
-            setTyping(false)
+            // Clear the typing indicator for the channel the message arrived on.
+            if (data.message.channel === 'ideation') {
+              setIdeationTyping(false)
+            } else {
+              setTyping(false)
+            }
           } else if (data.type === 'message_updated' && data.message) {
             updateMessage(data.message)
           } else if (data.type === 'phase_change' && data.phase) {
             setPipelinePhase(data.phase)
           } else if (data.type === 'typing') {
-            setTyping(!!data.typing)
+            // Route typing events by channel — default to main when omitted so
+            // existing main-pipeline emits (which don't carry a channel) keep
+            // working unchanged.
+            if (data.channel === 'ideation') {
+              setIdeationTyping(!!data.typing)
+            } else {
+              setTyping(!!data.typing)
+            }
           } else if (data.type === 'progress' && data.agent) {
             updateProgress({
               agent: data.agent,
@@ -87,5 +100,5 @@ export function useProposalWebSocket(proposalId: string | undefined) {
       }
       setConnected(false)
     }
-  }, [proposalId, addMessage, updateMessage, setPipelinePhase, setConnected, setTyping, updateProgress])
+  }, [proposalId, addMessage, updateMessage, setPipelinePhase, setConnected, setTyping, setIdeationTyping, updateProgress])
 }

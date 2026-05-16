@@ -80,4 +80,26 @@ describe('IdeationDrawer', () => {
     expect(await screen.findByText(/Couldn't reach Bedrock/)).toBeInTheDocument()
     expect(screen.getByText(/Couldn't reach Bedrock/).closest('[data-error="ideation"]')).not.toBeNull()
   })
+
+  it('renders TypingIndicator when isIdeationTyping is true', async () => {
+    useChatStore.getState().reset()
+    useChatStore.getState().setIdeationTyping(true)
+    server.use(
+      http.get(`${API}/chat/p1/ideation/messages`, () => HttpResponse.json([])),
+    )
+    render(wrap(<IdeationDrawer open onClose={() => {}} proposalId="p1" />))
+    expect(await screen.findByTestId('ideation-typing')).toBeInTheDocument()
+  })
+
+  it('does not render TypingIndicator when only the MAIN isTyping is true (no leak)', async () => {
+    useChatStore.getState().reset()
+    useChatStore.getState().setTyping(true)  // main-chat typing
+    server.use(
+      http.get(`${API}/chat/p1/ideation/messages`, () => HttpResponse.json([])),
+    )
+    render(wrap(<IdeationDrawer open onClose={() => {}} proposalId="p1" />))
+    // The drawer's typing indicator must remain hidden when only the main
+    // chat is typing — guards against the regression fixed in 91bb135.
+    expect(screen.queryByTestId('ideation-typing')).toBeNull()
+  })
 })

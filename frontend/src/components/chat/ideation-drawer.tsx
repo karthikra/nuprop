@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useChatStore } from '../../stores/chat-store'
 import { useIdeationMessages, useSendIdeationMessage } from '../../api/proposals'
 import type { ChatMessage } from '../../types/proposal'
+import { TypingIndicator } from './message-bubble'
 
 interface Props {
   open: boolean
@@ -29,6 +30,7 @@ export function IdeationDrawer({ open, onClose, proposalId }: Props) {
   }, [serverMsgs, mergeIdeationMessages])
 
   const messages = useChatStore((s) => s.ideationMessages)
+  const isIdeationTyping = useChatStore((s) => s.isIdeationTyping)
   const send = useSendIdeationMessage()
 
   const [draft, setDraft] = useState('')
@@ -108,6 +110,11 @@ export function IdeationDrawer({ open, onClose, proposalId }: Props) {
             />
           ) : (
             messages.map((m) => <IdeationBubble key={m.id} message={m} />)
+          )}
+          {isIdeationTyping && (
+            <div data-testid="ideation-typing">
+              <TypingIndicator />
+            </div>
           )}
           <div ref={endRef} />
         </div>
