@@ -5,7 +5,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_agency_id
+from app.core.config import get_settings
+from app.core.deps import get_current_agency_id, get_nonce_store
+from app.core.errors import OAuthStateError
 from app.domain.schemas.connector_schemas import (
     GmailAuthUrlResponse,
     GmailCallbackRequest,
@@ -13,6 +15,7 @@ from app.domain.schemas.connector_schemas import (
     GmailSyncResponse,
 )
 from app.infrastructure.db.database import get_db
+from app.infrastructure.security.oauth_state import NonceStore, verify_state
 from app.viewmodels.connector_viewmodel import ConnectorViewModel
 
 router = APIRouter(prefix="/connectors", tags=["connectors"])
@@ -20,6 +23,22 @@ router = APIRouter(prefix="/connectors", tags=["connectors"])
 
 def get_vm(request: Request, db: AsyncSession = Depends(get_db)) -> ConnectorViewModel:
     return ConnectorViewModel(request, db)
+
+
+async def _verified_agency_from_state(
+    state: str, provider: str, nonce_store: NonceStore,
+) -> UUID:
+    if not state:
+        raise HTTPException(status_code=400, detail="missing oauth state")
+    try:
+        return await verify_state(
+            token=state,
+            expected_provider=provider,
+            secret=get_settings().JWT_SECRET_KEY,
+            nonce_store=nonce_store,
+        )
+    except OAuthStateError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid oauth state ({exc.code})")
 
 
 @router.get("/gmail/auth-url", response_model=GmailAuthUrlResponse)
@@ -36,9 +55,10 @@ async def gmail_auth_url(
 @router.post("/gmail/callback", response_model=GmailStatusResponse)
 async def gmail_callback(
     body: GmailCallbackRequest,
-    agency_id: UUID = Depends(get_current_agency_id),
     vm: ConnectorViewModel = Depends(get_vm),
+    nonce_store: NonceStore = Depends(get_nonce_store),
 ):
+    agency_id = await _verified_agency_from_state(body.state, "gmail", nonce_store)
     result = await vm.handle_callback(agency_id, body.code)
     if not result:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
@@ -79,7 +99,6 @@ async def drive_sync(
     agency_id: UUID = Depends(get_current_agency_id),
     vm: ConnectorViewModel = Depends(get_vm),
 ):
-    """Sync Google Drive documents for all clients. Requires Gmail to be connected (same Google account)."""
     result = await vm.sync_drive(agency_id)
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
@@ -93,7 +112,6 @@ async def calendar_sync(
     agency_id: UUID = Depends(get_current_agency_id),
     vm: ConnectorViewModel = Depends(get_vm),
 ):
-    """Analyze calendar meeting patterns for all clients. Requires Gmail to be connected."""
     result = await vm.sync_calendar(agency_id)
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
@@ -116,9 +134,10 @@ async def slack_auth_url(
 @router.post("/slack/callback")
 async def slack_callback(
     body: GmailCallbackRequest,
-    agency_id: UUID = Depends(get_current_agency_id),
     vm: ConnectorViewModel = Depends(get_vm),
+    nonce_store: NonceStore = Depends(get_nonce_store),
 ):
+    agency_id = await _verified_agency_from_state(body.state, "slack", nonce_store)
     result = await vm.handle_slack_callback(agency_id, body.code)
     if not result:
         raise HTTPException(status_code=400, detail="Slack connection failed")
