@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
