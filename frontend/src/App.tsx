@@ -19,6 +19,7 @@ import { TemplateListPage } from './pages/templates/list'
 import { TemplateEditorPage } from './pages/templates/editor'
 import { AgencySettingsPage } from './pages/settings/agency'
 import { GmailCallbackPage } from './pages/settings/gmail-callback'
+import { SlackCallbackPage } from './pages/settings/slack-callback'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -94,6 +95,7 @@ export default function App() {
               <Route path="/analytics/:id" element={<AnalyticsDetailPage />} />
               <Route path="/settings" element={<AgencySettingsPage />} />
               <Route path="/settings/gmail-callback" element={<GmailCallbackPage />} />
+              <Route path="/settings/slack-callback" element={<SlackCallbackPage />} />
             </Route>
           </Route>
         </Routes>
