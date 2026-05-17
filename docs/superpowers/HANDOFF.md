@@ -194,12 +194,12 @@ cd frontend && pnpm build
 | ~~S0~~ — Truth baseline | ~~0.25d~~ ✅ done 2026-05-16 | This handoff rewrite + audit doc + memory |
 | ~~S1~~ — Backend CRITICAL fixes | ~~1d~~ ✅ done 2026-05-16 | Fail-loud encryption + signed OAuth state (HMAC + Redis nonce dedup) + DI for ContextService/TokenVault/NonceStore + per-domain Gmail-sync commits with watermarks + module-level loggers across all 8 M16-M20 backend files. 45 new pytest cases, all green. |
 | ~~S2~~ — Manual context UI on Client page | ~~1d~~ ✅ done 2026-05-17 | `POST /context/preview` + `/context/save` endpoints, `<AddContextSection>` inline state machine (collapsed→editing→preview→save), `<ContextBriefToggle>` on-demand brief preview, reset button with native `confirm()`. ContextProfileCard extracted from detail.tsx. +6 pytest cases, +17 vitest cases (4 brief-toggle + 5 profile-card + 7 add-context + 1 clientId regression). M16 is shippable end-to-end. |
-| **S3** — Connector frontend + Slack callback + tests | 1.5d | M17-M19 frontend parity |
+| ~~S3~~ — Connector frontend + Slack callback + tests | ~~1.5d~~ ✅ done 2026-05-17 | 7 new TanStack hooks (Drive/Cal sync + 5 Slack), 4 new connector cards extracted into `components/settings/{gmail,drive,calendar,slack}-connector-card.tsx`, `SlackCallbackPage` closes the previously-broken Slack OAuth round-trip (`SLACK_REDIRECT_URI` route had no handler before), `agency.tsx` slimmed from 240→53 LOC. +23 vitest cases across 5 new test files (171/32 total). M17-M19 frontend parity. |
 | **S4** — Production OAuth wiring | 0.5d | Google + Slack OAuth apps registered, secrets set, smoke-tested |
 | **S5** — Pipeline integration | 1.5d | Wire context_brief into 5 unwired phases; `build_cost_model` consumes `proposal.preferences`; ideation gets relationship context; email auto-enrichment post-sync |
-| **S6** — Backend HIGH/MEDIUM polish + retry/backoff | 1d | Defer-able. Includes S2 follow-up: ContextBriefToggle local cache survives invalidation (stale brief after reset until remount) — known limitation, documented in component. |
+| **S6** — Backend HIGH/MEDIUM polish + retry/backoff | 1d | Defer-able. Includes S2 follow-up: ContextBriefToggle local cache survives invalidation (stale brief after reset until remount) — known limitation, documented in component. Plus S3 follow-up: `getAuthUrl.isError` and `disconnectSlack.isError` not surfaced in connector cards (shared gap with Gmail's pre-existing design). |
 
-Each slice gets its own spec in `docs/superpowers/specs/`, its own worktree, and a user-approval checkpoint at the end. **Active slice: S3** (will open worktree `m16-m20-s3-connector-frontend`).
+Each slice gets its own spec in `docs/superpowers/specs/`, its own worktree, and a user-approval checkpoint at the end. **Active slice: S4** (production OAuth wiring — needs user's hands more than the AI's).
 
 #### S1 — what landed (commits on `worktree-m16-m20-s1-backend-hardening`, ready to merge to `main`)
 
