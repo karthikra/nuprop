@@ -1,11 +1,62 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-16 (mid-day rewrite — auto-deploy enabled + M16-M20 truth baseline)
-**Latest commit on `main`:** `9194bd0` (pushed to `origin/main`)
-**Working tree:** clean. Branch: `main`. No worktrees.
-**Production:** **LIVE at https://nuprop.fly.dev** — `GET /api/v1/health → 200`. **Auto-deploys on push to `main`** (GitHub Actions, `FLY_API_TOKEN` secret set).
+**Last updated:** 2026-05-17 (end of S4 phases 1-5 — phase 6 smoke test pending tomorrow)
+**Latest commit on `main`:** `28694bc` (S3 merged + deployed). Worktree `m16-m20-s4-prod-oauth` has S4 work + this doc update; will merge after smoke passes.
+**Working tree:** worktree-m16-m20-s4-prod-oauth active (1 commit ahead of main: `5a69473` spec doc).
+**Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed (S4 P4 added 7 new). **Auto-deploys on push to `main`** (GitHub Actions, `FLY_API_TOKEN` secret set).
 
-> ⚠️ **Earlier versions of this file claimed M16-M20 were unstarted.** That was wrong. M16-M20 are substantially scaffolded at the backend — see `docs/superpowers/audits/2026-05-16-m16-m20-state-audit.md` for the full audit. The "Next session" menu below is updated to reflect actual state.
+## 🛑 START HERE TOMORROW — S4 Phase 6 smoke test (P6)
+
+**The connector OAuth wiring is fully deployed in prod but never smoke-tested in a browser.** That's the first thing to do. Until P6 passes, S4 isn't done.
+
+Open https://nuprop.fly.dev → log in → Settings. Walk through these 6 checks in order:
+
+| # | Action | Expected |
+|---|---|---|
+| 1 | Click **Connect Gmail** | Popup → accounts.google.com → Allow → `/settings/gmail-callback` → "Gmail connected" → closes → parent shows your Gmail address + green Connected badge |
+| 2 | Click **Connect Slack** | Popup → slack.com/oauth/v2/authorize → Allow → `/settings/slack-callback` → "Slack connected" → closes → parent shows workspace name |
+| 3 | **Drive** card → Sync Now | ~5s → green "Found X documents across Y clients" |
+| 4 | **Calendar** card → Sync Now | ~5s → green "Found X meetings across Y clients" |
+| 5 | **Gmail** card → Sync Now | ~15s (LLM classifies) → success alert with email/domain counts |
+| 6 | **Slack** card → Sync | ~10s → green "Found X mentions across Y clients" |
+
+If anything fails: `fly logs -a nuprop | grep -iE "connector|oauth|encrypt" | tail -20` — S1 tags every relevant event so the error is obvious.
+
+Common gotchas:
+- Popup blocker — allow popups for nuprop.fly.dev
+- Google `redirect_uri_mismatch` — must be exactly `https://nuprop.fly.dev/settings/gmail-callback` (no trailing slash)
+- Slack "Invalid OAuth state" — S1's 10-minute nonce TTL elapsed; click Connect again
+- Drive/Cal "Google not connected" — do Gmail first
+
+## 🔐 After P6 passes — rotate secrets (chat exposure cleanup)
+
+During S4 P4, the four OAuth secrets were pasted into the AI chat transcript:
+- `GOOGLE_CLIENT_SECRET=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`
+- `SLACK_CLIENT_SECRET=fdf51ff06cedda29a2f0c27cd1f59415`
+- `ENCRYPTION_KEY=t6TjRRsjv8rqhpDf2M-kRFnhw9MGuVx9wBCu5vIYeIk=` (AI-generated, also exposed)
+- (`GOOGLE_CLIENT_ID` and `SLACK_CLIENT_ID` are not sensitive — public identifiers)
+
+The transcript is local to Karthik's machine, but best practice is to rotate:
+
+1. **Google:** Cloud Console → Credentials → NUPROP Web Client → Reset Secret. New secret shown once.
+2. **Slack:** api.slack.com/apps → NUPROP → Basic Information → App Credentials → "Regenerate" the Client Secret.
+3. **ENCRYPTION_KEY:** generate fresh with `backend/.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'`. ⚠️ Rotating ENCRYPTION_KEY invalidates any stored Slack tokens from P6 — users must re-authorize after rotation.
+4. Re-run the `fly secrets set` from S4 P4 with all 3 new values (the other 4 stay the same).
+
+Recommended ordering: do P6 first to confirm the wiring works end-to-end, then rotate (which forces re-auth — fine because we want to test the re-auth path anyway).
+
+## ⏳ After rotation — merge S4 work + start S5
+
+The S4 worktree branch (`worktree-m16-m20-s4-prod-oauth`) has only doc commits (the spec at `5a69473` + the HANDOFF update). Fast-forward to main:
+
+```bash
+cd /Users/karthikramesh/Developer/nuprop
+git fetch origin
+git merge --ff-only worktree-m16-m20-s4-prod-oauth
+git push origin main
+```
+
+Then open worktree `m16-m20-s5-pipeline-integration` and brainstorm S5 — the biggest semantic slice. Wire `context_brief` and connector data into the 5 unwired pipeline phases, make `build_cost_model` consume `proposal.preferences`, add post-sync email auto-enrichment. ~1.5 days, all backend.
 
 > Read this top-to-bottom (~3 min) on resume. The "Quick verification" block at the bottom gets you from `/clear` to "ready to keep working" in 60 seconds of bash.
 
@@ -195,11 +246,11 @@ cd frontend && pnpm build
 | ~~S1~~ — Backend CRITICAL fixes | ~~1d~~ ✅ done 2026-05-16 | Fail-loud encryption + signed OAuth state (HMAC + Redis nonce dedup) + DI for ContextService/TokenVault/NonceStore + per-domain Gmail-sync commits with watermarks + module-level loggers across all 8 M16-M20 backend files. 45 new pytest cases, all green. |
 | ~~S2~~ — Manual context UI on Client page | ~~1d~~ ✅ done 2026-05-17 | `POST /context/preview` + `/context/save` endpoints, `<AddContextSection>` inline state machine (collapsed→editing→preview→save), `<ContextBriefToggle>` on-demand brief preview, reset button with native `confirm()`. ContextProfileCard extracted from detail.tsx. +6 pytest cases, +17 vitest cases (4 brief-toggle + 5 profile-card + 7 add-context + 1 clientId regression). M16 is shippable end-to-end. |
 | ~~S3~~ — Connector frontend + Slack callback + tests | ~~1.5d~~ ✅ done 2026-05-17 | 7 new TanStack hooks (Drive/Cal sync + 5 Slack), 4 new connector cards extracted into `components/settings/{gmail,drive,calendar,slack}-connector-card.tsx`, `SlackCallbackPage` closes the previously-broken Slack OAuth round-trip (`SLACK_REDIRECT_URI` route had no handler before), `agency.tsx` slimmed from 240→53 LOC. +23 vitest cases across 5 new test files (171/32 total). M17-M19 frontend parity. |
-| **S4** — Production OAuth wiring | 0.5d | Google + Slack OAuth apps registered, secrets set, smoke-tested |
+| **S4** — Production OAuth wiring | 0.5d | ⏳ **P1-P5 DONE 2026-05-17, P6 smoke test pending tomorrow.** Google + Slack OAuth apps registered, 7 Fly secrets set (`GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI`, `SLACK_CLIENT_ID/SECRET/REDIRECT_URI`, `ENCRYPTION_KEY`), rolling redeploy succeeded across all 3 machines (version 11, health passing). S1 startup-validation passed (lifespan saw both client IDs + encryption key, didn't fail-loud). Spec at `docs/superpowers/specs/2026-05-17-s4-prod-oauth-design.md`. After P6 passes: rotate 3 secrets exposed in chat (see "🔐 After P6" section at top). |
 | **S5** — Pipeline integration | 1.5d | Wire context_brief into 5 unwired phases; `build_cost_model` consumes `proposal.preferences`; ideation gets relationship context; email auto-enrichment post-sync |
 | **S6** — Backend HIGH/MEDIUM polish + retry/backoff | 1d | Defer-able. Includes S2 follow-up: ContextBriefToggle local cache survives invalidation (stale brief after reset until remount) — known limitation, documented in component. Plus S3 follow-up: `getAuthUrl.isError` and `disconnectSlack.isError` not surfaced in connector cards (shared gap with Gmail's pre-existing design). |
 
-Each slice gets its own spec in `docs/superpowers/specs/`, its own worktree, and a user-approval checkpoint at the end. **Active slice: S4** (production OAuth wiring — needs user's hands more than the AI's).
+Each slice gets its own spec in `docs/superpowers/specs/`, its own worktree, and a user-approval checkpoint at the end. **Active slice: S4 — Phase 6 smoke test pending.** Walkthrough at top of this file.
 
 #### S1 — what landed (commits on `worktree-m16-m20-s1-backend-hardening`, ready to merge to `main`)
 
