@@ -132,6 +132,30 @@ async def preview_context(
     return ContextPreviewResponse(extracted=extracted)
 
 
+@router.post("/{client_id}/context/save", response_model=ClientResponse)
+async def save_context(
+    client_id: UUID,
+    body: ContextSaveRequest,
+    agency_id: UUID = Depends(get_current_agency_id),
+    vm: ClientViewModel = Depends(get_vm),
+    ctx: ContextService = Depends(get_context_service),
+):
+    """Merge a previously-previewed context profile into the client's existing
+    context_profile. No LLM call — the structure was already extracted via
+    /context/preview."""
+    client = await vm.get_client(client_id, agency_id)
+    if not client:
+        raise HTTPException(status_code=vm.status_code, detail=vm.error)
+
+    existing = client.context_profile or {}
+    merged = await ctx.merge_context(existing, body.profile)
+
+    updated = await vm.update_client(client_id, agency_id, ClientUpdate(context_profile=merged))  # type: ignore
+    if not updated:
+        raise HTTPException(status_code=500, detail="Failed to update context")
+    return updated
+
+
 @router.get("/{client_id}/context-brief")
 async def get_context_brief(
     client_id: UUID,
