@@ -1,8 +1,14 @@
+import { useResetContext } from '../../api/clients'
+import { ContextBriefToggle } from './context-brief-toggle'
+
 interface ContextProfileCardProps {
   profile: Record<string, unknown>
+  clientId: string
 }
 
-export function ContextProfileCard({ profile }: ContextProfileCardProps) {
+export function ContextProfileCard({ profile, clientId }: ContextProfileCardProps) {
+  const resetContext = useResetContext(clientId)
+
   if (!profile || Object.keys(profile).length === 0) return null
 
   const rel = profile.relationship as Record<string, unknown> | undefined
@@ -10,9 +16,25 @@ export function ContextProfileCard({ profile }: ContextProfileCardProps) {
   const pastWork = Array.isArray(profile.past_work) ? profile.past_work as Array<Record<string, unknown>> : []
   const risks = Array.isArray(profile.risks) ? profile.risks as Array<Record<string, unknown>> : []
 
+  const handleReset = () => {
+    if (!confirm('Reset all context for this client? This cannot be undone.')) return
+    resetContext.mutate()
+  }
+
   return (
     <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-5 md:col-span-2">
-      <h3 className="text-sm font-semibold text-indigo-700 uppercase tracking-wide">Client Context</h3>
+      <div className="flex items-start justify-between">
+        <h3 className="text-sm font-semibold text-indigo-700 uppercase tracking-wide">Client Context</h3>
+        <button
+          type="button"
+          onClick={handleReset}
+          disabled={resetContext.isPending}
+          className="text-[10px] font-medium text-indigo-500 hover:text-red-600 disabled:opacity-50 uppercase tracking-wide"
+        >
+          {resetContext.isPending ? 'Resetting...' : 'Reset context'}
+        </button>
+      </div>
+
       <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
         {rel?.status != null ? (
           <div>
@@ -51,6 +73,8 @@ export function ContextProfileCard({ profile }: ContextProfileCardProps) {
           </div>
         ) : null}
       </div>
+
+      <ContextBriefToggle clientId={clientId} />
     </div>
   )
 }

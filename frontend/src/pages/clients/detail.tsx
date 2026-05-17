@@ -113,7 +113,7 @@ export function ClientDetailPage() {
           </div>
 
           {/* Context Profile card */}
-          <ContextProfileCard profile={client.context_profile} />
+          <ContextProfileCard profile={client.context_profile} clientId={client.id} />
 
           {/* Intelligence cards */}
           {intelligence != null ? (
