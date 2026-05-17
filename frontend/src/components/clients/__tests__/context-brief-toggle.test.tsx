@@ -79,4 +79,26 @@ describe('ContextBriefToggle', () => {
       expect(screen.getByText(/no context to summarise/i)).toBeInTheDocument(),
     )
   })
+
+  it('clears the local cache when clientId prop changes', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get(`${API}/clients/c1/context-brief`, () =>
+        HttpResponse.json({ brief: 'brief for c1', has_context: true, email_count: 0 }),
+      ),
+      http.get(`${API}/clients/c2/context-brief`, () =>
+        HttpResponse.json({ brief: 'brief for c2', has_context: true, email_count: 0 }),
+      ),
+    )
+    const { rerender } = renderWithProviders(<ContextBriefToggle clientId="c1" />)
+    await user.click(screen.getByRole('button', { name: /show what the AI sees/i }))
+    await waitFor(() => expect(screen.getByText(/brief for c1/i)).toBeInTheDocument())
+
+    // Switch to client c2 — re-render with new prop
+    rerender(<ContextBriefToggle clientId="c2" />)
+    // Cache resets, query refires for c2 because open is still true
+    await waitFor(() => expect(screen.getByText(/brief for c2/i)).toBeInTheDocument())
+    // The previous client's brief must NOT be rendered
+    expect(screen.queryByText(/brief for c1/i)).not.toBeInTheDocument()
+  })
 })

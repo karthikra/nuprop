@@ -11,11 +11,22 @@ export function ContextBriefToggle({ clientId }: ContextBriefToggleProps) {
   const { data, isLoading } = useContextBrief(clientId, open && cached === null)
 
   // Once we receive data, store it in local state so close+reopen is instant
+  // without hitting Bedrock again. Known limitation: this cache survives
+  // `useResetContext` / `useContextSave` invalidation of the query key — the
+  // user may see a stale brief until the component remounts (e.g., page
+  // refresh). Tracked as S6 follow-up; the cross-mutation case is rare in
+  // practice (user resets then immediately reopens the brief).
   useEffect(() => {
     if (data != null) {
       setCached(data)
     }
   }, [data])
+
+  // Reset local cache when clientId changes — otherwise we'd render the
+  // previous client's brief if this component instance is reused.
+  useEffect(() => {
+    setCached(null)
+  }, [clientId])
 
   const brief = cached ?? data
 
