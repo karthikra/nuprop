@@ -46,3 +46,21 @@ class ClientResponse(BaseModel):
     context_profile: dict = {}
     created_at: datetime
     updated_at: datetime
+
+
+class ContextPreviewRequest(BaseModel):
+    raw_text: str
+
+
+class ContextPreviewResponse(BaseModel):
+    """The extracted context structure, NOT yet persisted. The client is
+    expected to roundtrip this back via /context/save to commit it."""
+
+    extracted: dict
+
+
+class ContextSaveRequest(BaseModel):
+    """A previously-previewed profile, ready to merge into the client's
+    existing context_profile. The server does NOT re-extract from raw_text."""
+
+    profile: dict
