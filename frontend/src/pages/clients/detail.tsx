@@ -4,6 +4,7 @@ import { useClient, useUpdateClient, useDeleteClient } from '../../api/clients'
 import { useClientIntelligence } from '../../api/intelligence'
 import { ClientForm } from '../../components/clients/client-form'
 import { ContextProfileCard } from '../../components/clients/context-profile-card'
+import { AddContextSection } from '../../components/clients/add-context-section'
 import type { ClientCreate } from '../../types/client'
 
 export function ClientDetailPage() {
@@ -111,6 +112,9 @@ export function ClientDetailPage() {
               </div>
             )}
           </div>
+
+          {/* Manual Context input */}
+          <AddContextSection clientId={client.id} />
 
           {/* Context Profile card */}
           <ContextProfileCard profile={client.context_profile} clientId={client.id} />
