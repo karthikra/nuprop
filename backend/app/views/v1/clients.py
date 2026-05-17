@@ -7,7 +7,14 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_context_service, get_current_agency_id
-from app.domain.schemas.client_schemas import ClientCreate, ClientResponse, ClientUpdate
+from app.domain.schemas.client_schemas import (
+    ClientCreate,
+    ClientResponse,
+    ClientUpdate,
+    ContextPreviewRequest,
+    ContextPreviewResponse,
+    ContextSaveRequest,
+)
 from app.infrastructure.db.database import get_db
 from app.services.context_service import ContextService
 from app.viewmodels.client_viewmodel import ClientViewModel
@@ -105,6 +112,24 @@ async def add_context(
     if not updated:
         raise HTTPException(status_code=500, detail="Failed to update context")
     return updated
+
+
+@router.post("/{client_id}/context/preview", response_model=ContextPreviewResponse)
+async def preview_context(
+    client_id: UUID,
+    body: ContextPreviewRequest,
+    agency_id: UUID = Depends(get_current_agency_id),
+    vm: ClientViewModel = Depends(get_vm),
+    ctx: ContextService = Depends(get_context_service),
+):
+    """Extract a structured context profile from raw text WITHOUT persisting.
+    The client is expected to roundtrip the result via /context/save to commit."""
+    client = await vm.get_client(client_id, agency_id)
+    if not client:
+        raise HTTPException(status_code=vm.status_code, detail=vm.error)
+
+    extracted = await ctx.extract_context(body.raw_text)
+    return ContextPreviewResponse(extracted=extracted)
 
 
 @router.get("/{client_id}/context-brief")
