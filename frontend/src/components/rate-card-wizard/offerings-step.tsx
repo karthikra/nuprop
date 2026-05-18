@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { Offering, Package } from '../../types/rate-card'
 import { nextOfferingCode, toSnakeKey } from './keys'
 
@@ -13,15 +13,11 @@ function prettify(key: string): string {
 
 export function OfferingsStep({ value, onChange }: Props) {
   const codes = Object.keys(value)
-  const [selectedCode, setSelectedCode] = useState<string | null>(codes[0] ?? null)
-
-  // Keep the selection sane when offerings list changes (e.g. after delete).
-  useEffect(() => {
-    if (selectedCode && !(selectedCode in value)) {
-      const remaining = Object.keys(value)
-      setSelectedCode(remaining[0] ?? null)
-    }
-  }, [value, selectedCode])
+  const [preferredCode, setPreferredCode] = useState<string | null>(codes[0] ?? null)
+  // Derive the actually-selected code: fall back to the first available
+  // offering when the user's preferred code was deleted or re-keyed elsewhere.
+  const selectedCode = preferredCode && preferredCode in value ? preferredCode : (codes[0] ?? null)
+  const setSelectedCode = setPreferredCode
 
   const addOffering = () => {
     const code = nextOfferingCode(value)
