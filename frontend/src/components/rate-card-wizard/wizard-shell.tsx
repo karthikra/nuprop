@@ -11,6 +11,7 @@ interface Props {
   onContinue: () => void
   continueLabel?: string
   notice?: string
+  disabled?: boolean
 }
 
 export function WizardShell({
@@ -24,6 +25,7 @@ export function WizardShell({
   onContinue,
   continueLabel = 'Save & Continue →',
   notice,
+  disabled,
 }: Props) {
   return (
     <div className="rounded-xl border border-stone-200 bg-white overflow-hidden">
@@ -63,7 +65,8 @@ export function WizardShell({
         </div>
         <button
           onClick={onContinue}
-          className="rounded-lg bg-stone-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-stone-800"
+          disabled={disabled}
+          className="rounded-lg bg-stone-900 px-4 py-1.5 text-xs font-medium text-white hover:bg-stone-800 disabled:opacity-50 disabled:pointer-events-none"
         >
           {continueLabel}
         </button>

@@ -73,4 +73,9 @@ describe('WizardShell', () => {
     setup({ notice: 'You can fill this in later in Settings' })
     expect(screen.getByText(/fill this in later/i)).toBeInTheDocument()
   })
+
+  it('disables the primary button when disabled prop is true', () => {
+    setup({ disabled: true })
+    expect(screen.getByRole('button', { name: /save & continue/i })).toBeDisabled()
+  })
 })
