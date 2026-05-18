@@ -120,4 +120,25 @@ describe('OfferingsStep', () => {
     await user.click(screen.getByRole('button', { name: /delete offering brand identity/i }))
     expect(onChange).toHaveBeenLastCalledWith({})
   })
+
+  it('refuses to re-key an offering when the target code is already taken', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const TWO_OFFERINGS = {
+      ...SAMPLE,
+      DM: { name: 'Digital Marketing', code: 'DM', packages: {} },
+    }
+    render(<Wrapper initial={TWO_OFFERINGS} onChange={onChange} />)
+
+    // Brand Identity is selected by default. Try to rename its code to DM (taken).
+    const codeInput = screen.getByLabelText(/offering code/i)
+    await user.clear(codeInput)
+    // user.type fires onChange per keystroke — typing "D" then "M"
+    await user.type(codeInput, 'DM')
+
+    // The collision guard should have prevented the rename when D + M was complete.
+    // Check that DM still points at the original Digital Marketing, not Brand Identity.
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0]
+    expect(lastCall?.DM?.name).toBe('Digital Marketing')
+  })
 })

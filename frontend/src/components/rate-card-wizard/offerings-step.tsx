@@ -36,6 +36,11 @@ export function OfferingsStep({ value, onChange }: Props) {
   const updateOffering = (code: string, patch: Partial<Offering>) => {
     if (patch.code && patch.code !== code) {
       const next = { ...value }
+      if (patch.code in next) {
+        // Code is already taken by another offering — silently drop the rename
+        // to avoid clobbering. The user must pick a unique code.
+        return
+      }
       const oldOffering = next[code]
       delete next[code]
       next[patch.code] = { ...oldOffering, ...patch }

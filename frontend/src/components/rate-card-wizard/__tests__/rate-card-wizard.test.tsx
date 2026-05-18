@@ -100,4 +100,20 @@ describe('RateCardWizard', () => {
     render(<RateCardWizard onSubmit={vi.fn()} saving={true} />)
     expect(screen.getByRole('button', { name: /save & continue/i })).toBeDisabled()
   })
+
+  it('clicking "Skip this section" on the last sub-step submits the payload', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(<RateCardWizard onSubmit={onSubmit} saving={false} />)
+
+    // Advance to sub-step 2d
+    await user.click(screen.getByRole('button', { name: /save & continue/i }))
+    await user.click(screen.getByRole('button', { name: /save & continue/i }))
+    await user.click(screen.getByRole('button', { name: /save & continue/i }))
+    expect(screen.getByText(/defaults & policies/i)).toBeInTheDocument()
+
+    // Skip from the last step — should call onSubmit, not be a no-op
+    await user.click(screen.getByRole('button', { name: /skip this section/i }))
+    expect(onSubmit).toHaveBeenCalledOnce()
+  })
 })

@@ -52,7 +52,7 @@ export function RateCardWizard({ onSubmit, saving }: Props) {
       title={STEPS[subStep].title}
       subtitle={STEPS[subStep].subtitle}
       onBack={subStep > 0 ? goBack : undefined}
-      onSkip={advance}
+      onSkip={isLast ? handleContinue : advance}
       onContinue={handleContinue}
       continueLabel={continueLabel}
       disabled={saving}
