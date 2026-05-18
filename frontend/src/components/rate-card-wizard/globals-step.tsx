@@ -53,10 +53,9 @@ function Field({
       <span className="block text-xs font-medium text-stone-900 mb-1">{label}</span>
       <div className="flex items-center gap-1">
         <input
-          key={value}
           type="number"
           aria-label={label}
-          defaultValue={value}
+          value={value}
           onChange={(e) => onChange(Number(e.target.value) || 0)}
           className="w-20 rounded-md border border-stone-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-stone-900"
         />
