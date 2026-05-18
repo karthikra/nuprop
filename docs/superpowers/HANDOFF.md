@@ -1,15 +1,17 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-17 (end of S4 phases 1-5 — phase 6 smoke test pending tomorrow)
-**Latest commit on `main`:** `28694bc` (S3 merged + deployed). Worktree `m16-m20-s4-prod-oauth` has S4 work + this doc update; will merge after smoke passes.
-**Working tree:** worktree-m16-m20-s4-prod-oauth active (1 commit ahead of main: `5a69473` spec doc).
-**Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed (S4 P4 added 7 new). **Auto-deploys on push to `main`** (GitHub Actions, `FLY_API_TOKEN` secret set).
+**Last updated:** 2026-05-18 (rate-card wizard shipped + deployed; P6 smoke test STILL the open S4 gate)
+**Latest commit on `main`:** `a975568` (rate-card wizard, 14 commits merged + pushed). Auto-deployed to prod in 1m49s.
+**Working tree:** clean. On `main`. In sync with `origin/main`.
+**Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed, **4-sub-step rate-card wizard live in onboarding step 2** as of `a975568`.
 
-## 🛑 START HERE TOMORROW — S4 Phase 6 smoke test (P6)
+## 🛑 START HERE NEXT SESSION
 
-**The connector OAuth wiring is fully deployed in prod but never smoke-tested in a browser.** That's the first thing to do. Until P6 passes, S4 isn't done.
+**Two browser-only smoke tests are pending. Both have been "shipped to prod" without ever being clicked.** Do them in this order:
 
-Open https://nuprop.fly.dev → log in → Settings. Walk through these 6 checks in order:
+### 1. S4 P6 — OAuth connector smoke (was pending before today's wizard detour)
+
+Open https://nuprop.fly.dev → register (use `karthik.ramesh@veeville.com` or `@example.com`, NOT `.local` — Pydantic rejects it) → Settings. Walk through these 6 checks in order:
 
 | # | Action | Expected |
 |---|---|---|
@@ -20,58 +22,165 @@ Open https://nuprop.fly.dev → log in → Settings. Walk through these 6 checks
 | 5 | **Gmail** card → Sync Now | ~15s (LLM classifies) → success alert with email/domain counts |
 | 6 | **Slack** card → Sync | ~10s → green "Found X mentions across Y clients" |
 
-If anything fails: `fly logs -a nuprop | grep -iE "connector|oauth|encrypt" | tail -20` — S1 tags every relevant event so the error is obvious.
+Debugging: `fly logs -a nuprop | grep -iE "connector|oauth|encrypt" | tail -20`
 
 Common gotchas:
-- Popup blocker — allow popups for nuprop.fly.dev
+- Popup blocker — allow popups for `nuprop.fly.dev`
 - Google `redirect_uri_mismatch` — must be exactly `https://nuprop.fly.dev/settings/gmail-callback` (no trailing slash)
-- Slack "Invalid OAuth state" — S1's 10-minute nonce TTL elapsed; click Connect again
+- Slack "Invalid OAuth state" — S1's 10-min nonce TTL elapsed; click Connect again
 - Drive/Cal "Google not connected" — do Gmail first
 
-## 🔐 After P6 passes — rotate secrets (chat exposure cleanup)
+### 2. Rate-card wizard smoke (NEW today — shipped but never tested in browser)
 
-During S4 P4, the four OAuth secrets were pasted into the AI chat transcript:
-- `GOOGLE_CLIENT_SECRET=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`
-- `SLACK_CLIENT_SECRET=fdf51ff06cedda29a2f0c27cd1f59415`
-- `ENCRYPTION_KEY=t6TjRRsjv8rqhpDf2M-kRFnhw9MGuVx9wBCu5vIYeIk=` (AI-generated, also exposed)
-- (`GOOGLE_CLIENT_ID` and `SLACK_CLIENT_ID` are not sensitive — public identifiers)
+During the same registration flow, you'll be routed to onboarding step 2 BEFORE you reach Settings. Walk through the new 4-sub-step wizard:
 
-The transcript is local to Karthik's machine, but best practice is to rotate:
+| Sub-step | What to verify |
+|---|---|
+| **2a Offerings** | Click `+ Add offering` → new `O1 · New offering` appears in left rail and is selected. Edit name + code in right pane. Click `+ Add package` → blank row appears in table. Try to set code to a duplicate of another offering's code — it should silently refuse (collision guard from final review) |
+| **2b Hourly Rates** | Click a common-role chip (e.g., "Creative Director") → row appears in table with rate input focused, chip disappears. Edit the rate. Click `+ Add custom role` → text input → type → tab to commit |
+| **2c Multipliers** | All 4 fixed rows render with defaults (1.5, 0.88, 0.95, 1.5). Mono keys visible (`urgency_rush` etc.). Try setting Rush job to 0 → it'll be dropped from the payload. Click `+ Add custom multiplier` → form appears with amber warning |
+| **2d Globals** | 3 fields show defaults (10% / 3 / 2). Primary button label is "Finish rate card →" (not "Save & Continue"). Click Finish → onboarding advances to step 3 (voice calibration) |
 
-1. **Google:** Cloud Console → Credentials → NUPROP Web Client → Reset Secret. New secret shown once.
-2. **Slack:** api.slack.com/apps → NUPROP → Basic Information → App Credentials → "Regenerate" the Client Secret.
-3. **ENCRYPTION_KEY:** generate fresh with `backend/.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'`. ⚠️ Rotating ENCRYPTION_KEY invalidates any stored Slack tokens from P6 — users must re-authorize after rotation.
-4. Re-run the `fly secrets set` from S4 P4 with all 3 new values (the other 4 stay the same).
+Skip behavior: every sub-step's "Skip this section" link advances without filling anything. On 2d, "Skip this section" submits the payload (just like Finish). Verify by skipping all 4 — should land in step 3 with the agency having an empty-ish rate card in the DB.
 
-Recommended ordering: do P6 first to confirm the wiring works end-to-end, then rotate (which forces re-auth — fine because we want to test the re-auth path anyway).
-
-## ⏳ After rotation — merge S4 work + start S5
-
-The S4 worktree branch (`worktree-m16-m20-s4-prod-oauth`) has only doc commits (the spec at `5a69473` + the HANDOFF update). Fast-forward to main:
-
+To inspect what got submitted:
 ```bash
-cd /Users/karthikramesh/Developer/nuprop
-git fetch origin
-git merge --ff-only worktree-m16-m20-s4-prod-oauth
-git push origin main
+fly ssh console -a nuprop -C "python -c \"
+import asyncio, os
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+async def main():
+    e = create_async_engine(os.environ['DATABASE_URL'])
+    async with e.connect() as c:
+        r = await c.execute(text('SELECT version, offerings, hourly_rates, multipliers FROM rate_cards ORDER BY created_at DESC LIMIT 1'))
+        for row in r: print(row)
+asyncio.run(main())
+\""
 ```
 
-Then open worktree `m16-m20-s5-pipeline-integration` and brainstorm S5 — the biggest semantic slice. Wire `context_brief` and connector data into the 5 unwired pipeline phases, make `build_cost_model` consume `proposal.preferences`, add post-sync email auto-enrichment. ~1.5 days, all backend.
+## 🔐 After both smoke tests pass — rotate secrets (chat exposure cleanup)
 
-> Read this top-to-bottom (~3 min) on resume. The "Quick verification" block at the bottom gets you from `/clear` to "ready to keep working" in 60 seconds of bash.
+Three secrets were pasted into AI chat transcripts during S4 P4 and need rotation:
+- `GOOGLE_CLIENT_SECRET=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`
+- `SLACK_CLIENT_SECRET=fdf51ff06cedda29a2f0c27cd1f59415`
+- `ENCRYPTION_KEY=t6TjRRsjv8rqhpDf2M-kRFnhw9MGuVx9wBCu5vIYeIk=`
+
+The transcript is local but best practice is to rotate. Full step-by-step instructions are in the conversation history from 2026-05-18 — the short version:
+
+1. **Google:** https://console.cloud.google.com/apis/credentials → NUPROP Web Client → **Add secret** (don't reset — keep old enabled until rolling deploy confirms)
+2. **Slack:** https://api.slack.com/apps → NUPROP → Basic Information → App Credentials → **Regenerate**
+3. **Fernet:** `backend/.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'`
+4. **Atomic push** (must be ONE command — S1 lifespan refuses to start if OAuth creds present without ENCRYPTION_KEY):
+   ```bash
+   fly secrets set -a nuprop \
+     GOOGLE_CLIENT_SECRET="<new>" \
+     SLACK_CLIENT_SECRET="<new>" \
+     ENCRYPTION_KEY="<new fernet>"
+   ```
+5. ⚠️ ENCRYPTION_KEY rotation invalidates ALL stored Gmail + Slack tokens (`connector_viewmodel.py:146,557` both use the vault). After rotation, **disconnect** existing Gmail + Slack in Settings first (avoids decrypt_failed alert), then **reconnect**.
+6. Disable the old Google client secret only after re-auth confirms working.
+
+## After all that — pick next slice
+
+### Cleanup (5 min)
+
+4 stale worktrees from prior sessions are still on disk:
+```bash
+git worktree remove .claude/worktrees/m16-m20-s1-backend-hardening
+git worktree remove .claude/worktrees/m16-m20-s2-context-ui
+git worktree remove .claude/worktrees/m16-m20-s3-connector-frontend
+git worktree remove .claude/worktrees/m16-m20-s4-prod-oauth
+git worktree prune
+```
+
+All 4 are already merged into main. The branches still exist as references — delete if you want with `git branch -D worktree-m16-m20-s1-backend-hardening` etc.
+
+### S5 — Pipeline integration (~1.5d, all backend)
+
+The biggest semantic slice in the M16-M20 roadmap. Goal: make the proposal pipeline actually CONSUME the context + connector data we've spent S1-S4 setting up.
+
+Open questions to brainstorm:
+- Which of the 5 unwired pipeline phases get `context_brief` access first? (analyze_brief, run_research, run_benchmarks, build_cost_model, generate_narrative — only `run_ideation` consumes it today)
+- Should `build_cost_model` read `proposal.preferences` directly, or via a normalized lookup in PipelineContext?
+- Post-sync email auto-enrichment — trigger via webhook from connector sync, or a separate ARQ job?
+
+Suggested next-session opener: invoke `superpowers:brainstorming` with target "wire context_brief and connector data into the 5 unwired pipeline phases (S5)".
+
+### S6 — Backend polish (~1d, deferrable)
+
+HIGH/MEDIUM cleanups from the M16-M20 audit + retry/backoff. Includes:
+- ContextBriefToggle local cache survives invalidation (S2 follow-up)
+- `getAuthUrl.isError` / `disconnectSlack.isError` surfacing in connector cards (S3 follow-up)
+- Yellow-notice timed strip for the rate-card wizard's soft-required skip (today's deferral — see `docs/superpowers/specs/2026-05-18-rate-card-form-design.md` "Validation" section)
 
 ---
 
-## TL;DR
+## What happened today (2026-05-18)
 
-Today shipped two big things and closed the entire session backlog:
+Two threads:
 
-1. **Ideation side-channel** — the 17-task plan from 2026-05-15 executed via `superpowers:subagent-driven-development`. A read-only Claude side-channel attached to every proposal, with its own drawer, channel-aware store routing, channel-scoped typing indicator, error rendering, and isolated worker-failure handling. Merged to `main` cleanly.
-2. **Production deploy** — NUPROP is now live at https://nuprop.fly.dev on Fly Mumbai, with Neon Postgres (us-east-1) and Upstash Redis. All 6 secrets deployed, app + worker machines healthy, frontend served, health check passing.
+1. **Started:** continue S4 P6 smoke test + secret rotation (from yesterday's handoff).
+2. **Detoured:** user asked to replace the onboarding rate-card JSON-paste with a real form. Full brainstorm → spec → plan → subagent-driven execution → final review → merge + push → auto-deploy. Took the full session.
 
-Plus four follow-ups landed: register-flow React #31 fix, three reviewer follow-ups (test-helper consolidation, O(n²)→O(n) hydration, channel-aware typing), and the brief-intake-on-Haiku tier switch from a prior session.
+**P6 smoke + rotation were NOT touched today.** They remain the open S4 gates.
 
-**On the menu for the next session:** the older PRD backlog (M16-M20: client context + connector trio), GitHub Actions auto-deploy wire-up, dedicated AWS IAM user for Bedrock-only access. No bugs, no open work, no uncommitted state.
+### Today's commits (all on main, all deployed)
+
+```
+a975568 fix(rate-card): skip on last step submits; guard against offering code collision
+0c1d89c fix(rate-card): derive selectedCode instead of syncing via effect
+fe7e6e6 fix(rate-card): remove unnecessary cast in StepRateCard, use RateCardPayload directly
+a0901e5 feat(onboarding): rewrite step 2 as a thin RateCardWizard composer
+23a64dc feat(rate-card): RateCardWizard composer with payload filtering
+14fd11a fix(rate-card): use getByDisplayValue in test, drop redundant sr-only span
+01daa80 feat(rate-card): OfferingsStep (2a) — master/detail two-pane with editable code
+b5eea06 feat(rate-card): MultipliersStep (2c) — 4 fixed rows + custom with warning
+acdb786 feat(rate-card): HourlyRatesStep (2b) — chips + table + custom role
+55dbbc0 fix(rate-card): revert GlobalsStep to controlled input, add stateful test wrapper
+9bfa8b0 feat(rate-card): GlobalsStep (2d) — 3 fields with help text
+e4b0b64 feat(rate-card): WizardShell chrome with progress dots and sticky footer
+a7d0fe5 feat(rate-card): add known-multipliers and common-roles constants
+b5d40fb feat(rate-card): add key helpers and payload types
+c79be97 plan(rate-card): bite-sized TDD plan for onboarding wizard
+f305f54 chore: ignore .superpowers/ brainstorming artifacts
+046e3aa spec(rate-card): wizard form to replace JSON paste in onboarding step 2
+```
+
+### Frontend test count
+
+- 2026-05-17 baseline: 171 passing across 32 files
+- 2026-05-18 after rate-card wizard: 223 passing across 41 files (+52 tests)
+- `pnpm build` clean; new files have no lint errors (4 pre-existing lint errors in S2/S3 OAuth callback files remain — same `react-hooks/set-state-in-effect` pattern, not in scope)
+
+### Architecture: rate-card wizard at a glance
+
+```
+frontend/src/pages/onboarding/step-rate-card.tsx   ← thin composer (~15 LOC, was 107)
+  └─ <RateCardWizard onSubmit saving />            ← owns wizard state, payload filtering
+        ├─ <WizardShell .../>                       ← chrome: dots + header + body + footer
+        │     supports `disabled` and `notice` props
+        ├─ <OfferingsStep value onChange />         ← 2a master/detail two-pane
+        ├─ <HourlyRatesStep value onChange />       ← 2b chips + table + custom role
+        ├─ <MultipliersStep value onChange />       ← 2c 4 fixed rows + custom (warning)
+        └─ <GlobalsStep value onChange />           ← 2d 3 fields (markup, options, revisions)
+
+frontend/src/components/rate-card-wizard/
+  ├─ known-multipliers.ts   ← single source of truth: 4 magic keys cost_model_builder.py reads
+  ├─ common-roles.ts        ← 8 quick-add role chips
+  ├─ keys.ts                ← toSnakeKey, nextOfferingCode (pure)
+  ├─ types.ts               ← RateCardPayload (extends Record<string, unknown> for parent compat)
+  ├─ index.ts               ← barrel export
+  └─ __tests__/             ← 50 vitest cases (anchor test guards key drift vs backend)
+```
+
+Settings → Rate Card editor (`pages/rate-card/editor.tsx`) is UNTOUCHED — wizard is for first-capture only. Same backend contract (`POST /agencies/me/onboarding` step=2). No backend changes.
+
+### Lessons that ate cycles today (worth not repeating)
+
+1. **`defaultValue + key={value}` is never the right fix for "controlled input doesn't update in test"** — the bug is in the test harness lacking a stateful wrapper. Add `function Wrapper() { const [val, setVal] = useState(...); return <Component value={val} onChange={setVal} /> }` and the spec'd controlled pattern works. Saved this lesson into the plan as ⚠️ — every sub-step task after Task 4 worked first time.
+2. **EnterWorktree default baseRef is `fresh` (origin/<default-branch>)** — if local main has unpushed commits and you need them in the worktree, either push first OR set `worktree.baseRef: head` in `.claude/settings.local.json` BEFORE calling EnterWorktree (the setting won't apply mid-call). For today the simpler recovery was `git merge main --ff-only` inside the worktree right after creation.
+3. **jsdom doesn't implement `window.confirm`** — any component that calls `confirm()` (OfferingsStep does, for offering delete) needs `beforeEach(() => vi.spyOn(window, 'confirm').mockReturnValue(true))` in the test file or deletion tests will hang.
+4. **`getByText` doesn't match input values** — for uncontrolled inputs (`defaultValue=...`), use `getByDisplayValue` instead.
 
 ---
 
@@ -80,22 +189,19 @@ Plus four follow-ups landed: register-flow React #31 fix, three reviewer follow-
 ```bash
 # 1. Repo state
 cd /Users/karthikramesh/Developer/nuprop
-git log --oneline -3                       # HEAD = 1bc818c (or later)
-git status                                 # nothing to commit, working tree clean
+git log --oneline -3                       # HEAD = a975568
+git status                                 # clean, in sync with origin/main
 
 # 2. Local test suites
-cd backend && .venv/bin/python -m pytest -q   # → 244 passed, 0 skipped
-cd ../frontend && pnpm test --run              # → 131 passed across 24 files
+cd backend && .venv/bin/python -m pytest -q   # → 244 passed (unchanged)
+cd ../frontend && pnpm test                    # → 223 passed across 41 files
 
 # 3. Production health
-curl -s https://nuprop.fly.dev/api/v1/health
-# → {"status":"ok","service":"nuprop"}
+curl -s https://nuprop.fly.dev/api/v1/health   # → {"status":"ok","service":"nuprop"}
 
-# 4. Fly machines (3 expected: 1 app started, 1 worker started, 1 worker stopped-standby)
-fly machines list -a nuprop
+# 4. Fly machines
+fly machines list -a nuprop                    # 3 expected
 ```
-
-If all four pass, you're current. Pick from the menu in "Next session" below.
 
 ---
 
@@ -103,275 +209,27 @@ If all four pass, you're current. Pick from the menu in "Next session" below.
 
 | Thing | Path |
 |---|---|
-| Specs | `docs/superpowers/specs/` |
-| Plans | `docs/superpowers/plans/` |
 | **This file** | `docs/superpowers/HANDOFF.md` |
-| Project memory (loaded each session) | `~/.claude/projects/-Users-karthikramesh-Developer-nuprop/memory/` |
-| Global CLAUDE.md | `~/.claude/CLAUDE.md` |
+| Today's spec | `docs/superpowers/specs/2026-05-18-rate-card-form-design.md` |
+| Today's plan | `docs/superpowers/plans/2026-05-18-rate-card-wizard.md` |
+| Prior specs/plans | `docs/superpowers/{specs,plans}/` |
+| Project memory (auto-loaded) | `~/.claude/projects/-Users-karthikramesh-Developer-nuprop/memory/` |
 | Backend tests | `backend/tests/{unit,integration}/` |
 | Frontend tests | `frontend/src/**/__tests__/` |
-| Docker stack | `docker-compose.yml` + `Dockerfile` + `.env.docker` (gitignored) |
-| Fly deploy config | `fly.toml` (secrets set out-of-band; live values via `fly secrets list -a nuprop`) |
-| GH Actions deploy workflow (currently disabled) | `.github/workflows/deploy.yml` |
-
----
-
-## What's on the wire (production stack)
-
-```
-Browser → https://nuprop.fly.dev
-            │
-            ▼
-       Fly Edge (TLS, /api/v1/health probe every 30s)
-            │
-            ▼
-       App machine (Fly bom / Mumbai, shared-cpu-2x 1GB)
-       ├─ uvicorn app.main:app on port 8080
-       ├─ /data volume (PDF/DOCX outputs)
-       ├─ /root/.aws mount NOT used (boto3 uses env vars)
-       └─ env: DATABASE_URL, REDIS_URL, JWT_SECRET_KEY, AWS_*
-            │
-            ├──→ Neon Postgres (us-east-1, ~200ms RTT)
-            │    - postgresql+asyncpg://...neon.tech/neondb?ssl=require
-            │    - Free tier, 0.5GB, scales to zero
-            │    - Migration 02_ideation_channel applied
-            │
-            ├──→ Upstash Redis (regional plan, ~30ms RTT)
-            │    - rediss://default:...@positive-man-126512.upstash.io:6379
-            │    - TLS REQUIRED — plain redis:// is rejected
-            │    - Used by ARQ jobs + WS pub/sub bridge
-            │
-            └──→ AWS Bedrock (ap-northeast-1 / Tokyo)
-                 - via personal IAM user `karthik` (account 809644065208)
-                 - Sonnet 4.6 default, Opus 4.7 research, Haiku 4.5 brief-intake + ideation-plan
-
-       Worker machine (Fly bom, 1 active + 1 standby, shared-cpu-2x 1GB)
-       └─ arq app.workers.pipeline.WorkerSettings
-          - 7 phases: analyze_brief, run_research, run_benchmarks,
-                      build_cost_model, generate_narrative, generate_outputs,
-                      run_ideation
-          - Connects to same Redis + Postgres + Bedrock
-```
-
-**Fly Mumbai → Neon us-east-1 is the one obvious slow seam** — every query pays ~200ms. Tolerable for an LLM-bound app (Bedrock calls dominate 5-10s of latency anyway). Neon's branching makes a region migration cheap if it ever becomes a problem.
-
----
-
-## Repo state at handoff
-
-```text
-origin/main = 1bc818c = local main = clean working tree
-```
-
-Recent history (newest first — top 17 are this session):
-
-```
-1bc818c docs: nuprop is live — production deploy succeeded + trap notes
-f6bd173 docs: capture partial production-deploy state (paused on DB+Redis decisions)
-c1794d8 docs: mark loose-ends cleanup (Option B) complete
-1b8645c docs: mark all three reviewer follow-ups complete
-dbd081c feat(ui): channel-aware typing indicator for the ideation drawer
-070b4e1 perf(ui): O(n) ideation hydration via mergeIdeationMessages store action
-6a51d69 test: consolidate _make_proposal helpers into shared fixtures
-0ef10dd feat: switch brief_analyzer to Haiku 4.5 for chat felt-latency
-c47ebf1 docs: record formatApiError fix, correct bug-#1 misattribution + ignore .playwright-mcp
-b363d6f fix(ui): formatApiError handles Pydantic 422 array detail (React #31 crash)
-6d10990 docs: record smoke-test results + flag two register-flow bugs
-a38bdd1 docs: refresh handoff for ideation side-channel merge
-91bb135 fix: ideation real-time error delivery, typing isolation, migration safety
-5b82c89 feat(ui): mount IdeateButton and IdeationDrawer on the proposal page
-58b8638 feat(ui): IdeateButton with URL hash sync
-e3b2c16 feat(ui): IdeationDrawer with empty state, message list, send, and error rendering
-fdcb491 feat(api): useIdeationMessages and useSendIdeationMessage hooks
-… (12 more ideation-build commits)
-97472da docs: session handoff for resume after /clear     (← session boundary)
-```
-
-### Test suites (verified at end of session)
-
-```bash
-cd backend && .venv/bin/python -m pytest -q
-# → 244 passed, 0 skipped  (was 224 at session start; +20 ideation tests)
-
-cd frontend && pnpm test --run
-# → 131 passed across 24 files  (was 101 at session start; +30 across ideation, formatApiError,
-#                                 mergeIdeationMessages, channel-typing, and WS-routing)
-
-cd frontend && pnpm build
-# → clean
-
-.venv/bin/python -c "from app.main import app; print(len(app.routes))"
-# → 64   (was 62; +2 ideation routes — same as the 2026-05-15 merge)
-```
-
----
-
-## Today's arc, in order
-
-1. **Resume + decide** — started on `97472da`, picked Option A (execute the ideation plan).
-2. **Worktree setup** — `EnterWorktree(name: ideation-side-channel)`, symlinked backend/.venv + frontend/node_modules from main checkout, verified baseline (224 backend / 101 frontend).
-3. **Ideation execution** — 16 of 17 tasks via subagent-driven-development. Each task: implementer subagent (Haiku for mechanical, Sonnet for integration) → spec-compliance reviewer (Haiku) → code-quality reviewer (Sonnet for non-trivial) → fix loop → commit. Per-task commits amended for clean atomic history.
-4. **Operational recovery** — Task 12's implementer accidentally committed to `main` instead of the worktree branch (subagent ran `cd /Users/karthikramesh/Developer/nuprop/frontend`, the MAIN checkout, not the worktree's). Caught via the test count going 104→103 instead of 106. Cherry-picked to worktree, `git reset --hard 97472da` on main, brief_analyzer change stashed/popped to survive. Defensive prompt preamble added to every subsequent frontend-task subagent. No further contamination.
-5. **Cross-cutting final review** — caught two Critical bugs the per-task reviews missed: worker error path didn't publish `new_message` (drawer wouldn't render Bedrock failures in real time); shared `isTyping` flag leaked the ideation typing event into the main chat panel. Both fixed in `91bb135`.
-6. **Worktree merge** — fast-forward merge to main, ExitWorktree(remove). 16 commits landed cleanly.
-7. **Refresh HANDOFF.md** — initial post-merge version (`a38bdd1`).
-8. **Smoke test (Task 17)** — `docker compose up --build -d` against fresh build, Playwright drove register → create proposal → open drawer → send → verify everything end-to-end against real Bedrock. Caught two pre-existing frontend bugs in the process (`.local` TLD rejection — actually correct behavior; React #31 crash on rendering Pydantic 422 array — real bug).
-9. **formatApiError fix** (`b363d6f`) — helper in `frontend/src/api/client.ts` that returns a string from any axios-error shape. Applied at both crash sites. 5 vitest cases.
-10. **brief_analyzer Haiku switch** (`0ef10dd`) — committed the loose change from a prior session.
-11. **Three reviewer follow-ups** — `_make_proposal` consolidation (`6a51d69`), O(n) hydration (`070b4e1`), channel-aware typing (`dbd081c`).
-12. **Loose ends cleanup (Option B)** — deleted the duplicate `fly-deploy.yml` (Fly's auto-on-push template), kept the existing `deploy.yml` placeholder with auto-deploy commented out.
-13. **Production deploy** — provisioned Neon (us-east-1 free tier) + Upstash (regional plan, free tier), staged 6 secrets, did 3 deploys (first failed on Redis TLS; second got tangled in lease handling; third forced full replacement and came up clean). Live at https://nuprop.fly.dev as of `1bc818c`.
-
-**One session, 22 commits on `main`, full feature shipped + verified + deployed.**
-
----
-
-## Next session — pick one
-
-### Option A — Wire up GitHub Actions auto-deploy ✅ DONE 2026-05-16
-
-`FLY_API_TOKEN` GH secret set, `.github/workflows/deploy.yml` uncommented (`push: branches: [main]` active, `workflow_dispatch:` kept for manual re-deploys). First auto-deploy run `25965414713` succeeded in 2m14s. Every push to `main` now redeploys prod.
-
-### Option B — Finish M16-M20 (the REAL state)
-
-**M16-M20 are ~60% built, 40% remaining.** The 40% is the hardest 40%: backend hardening (5 CRITICAL security issues), frontend UI completion (Drive/Calendar/Slack have no React Query hooks, no Slack callback route, zero tests for any of this surface), pipeline integration (only 1 of 7 phases consumes M16-M20 data), and production OAuth wiring (5 missing Fly secrets + 2 unregistered OAuth apps).
-
-**Full audit:** `docs/superpowers/audits/2026-05-16-m16-m20-state-audit.md` — read this before touching M16-M20 code.
-
-**Slicing strategy (S0 → S6, ~5-8 dev-days + ~1hr of user OAuth-console clicks):**
-
-| Slice | Estimate | What ships |
-|---|---|---|
-| ~~S0~~ — Truth baseline | ~~0.25d~~ ✅ done 2026-05-16 | This handoff rewrite + audit doc + memory |
-| ~~S1~~ — Backend CRITICAL fixes | ~~1d~~ ✅ done 2026-05-16 | Fail-loud encryption + signed OAuth state (HMAC + Redis nonce dedup) + DI for ContextService/TokenVault/NonceStore + per-domain Gmail-sync commits with watermarks + module-level loggers across all 8 M16-M20 backend files. 45 new pytest cases, all green. |
-| ~~S2~~ — Manual context UI on Client page | ~~1d~~ ✅ done 2026-05-17 | `POST /context/preview` + `/context/save` endpoints, `<AddContextSection>` inline state machine (collapsed→editing→preview→save), `<ContextBriefToggle>` on-demand brief preview, reset button with native `confirm()`. ContextProfileCard extracted from detail.tsx. +6 pytest cases, +17 vitest cases (4 brief-toggle + 5 profile-card + 7 add-context + 1 clientId regression). M16 is shippable end-to-end. |
-| ~~S3~~ — Connector frontend + Slack callback + tests | ~~1.5d~~ ✅ done 2026-05-17 | 7 new TanStack hooks (Drive/Cal sync + 5 Slack), 4 new connector cards extracted into `components/settings/{gmail,drive,calendar,slack}-connector-card.tsx`, `SlackCallbackPage` closes the previously-broken Slack OAuth round-trip (`SLACK_REDIRECT_URI` route had no handler before), `agency.tsx` slimmed from 240→53 LOC. +23 vitest cases across 5 new test files (171/32 total). M17-M19 frontend parity. |
-| **S4** — Production OAuth wiring | 0.5d | ⏳ **P1-P5 DONE 2026-05-17, P6 smoke test pending tomorrow.** Google + Slack OAuth apps registered, 7 Fly secrets set (`GOOGLE_CLIENT_ID/SECRET/REDIRECT_URI`, `SLACK_CLIENT_ID/SECRET/REDIRECT_URI`, `ENCRYPTION_KEY`), rolling redeploy succeeded across all 3 machines (version 11, health passing). S1 startup-validation passed (lifespan saw both client IDs + encryption key, didn't fail-loud). Spec at `docs/superpowers/specs/2026-05-17-s4-prod-oauth-design.md`. After P6 passes: rotate 3 secrets exposed in chat (see "🔐 After P6" section at top). |
-| **S5** — Pipeline integration | 1.5d | Wire context_brief into 5 unwired phases; `build_cost_model` consumes `proposal.preferences`; ideation gets relationship context; email auto-enrichment post-sync |
-| **S6** — Backend HIGH/MEDIUM polish + retry/backoff | 1d | Defer-able. Includes S2 follow-up: ContextBriefToggle local cache survives invalidation (stale brief after reset until remount) — known limitation, documented in component. Plus S3 follow-up: `getAuthUrl.isError` and `disconnectSlack.isError` not surfaced in connector cards (shared gap with Gmail's pre-existing design). |
-
-Each slice gets its own spec in `docs/superpowers/specs/`, its own worktree, and a user-approval checkpoint at the end. **Active slice: S4 — Phase 6 smoke test pending.** Walkthrough at top of this file.
-
-#### S1 — what landed (commits on `worktree-m16-m20-s1-backend-hardening`, ready to merge to `main`)
-
-```
-c54b43c refactor(S1): add module logger to email_index_repo
-0c3e9e5 refactor(S1): module loggers on context_service + context_intelligence
-832861c refactor(S1): module loggers on slack/drive/calendar clients; narrow drive export except
-b8bf91e refactor(S1): gmail_client — module logger + narrowed excepts
-3293a04 feat(S1): inject ContextService via Depends() in clients routes
-956e039 feat(S1): connector route handlers verify OAuth state (Gmail + Slack)
-8ba4bdc fix(S1): sync_emails empty-messages watermark + final commit + last_sync semantic (review C1/C2/I3)
-2209685 feat(S1): per-domain commits and watermarks in Gmail sync
-60ec2eb refactor(S1): narrow excepts in connector sync paths, add structured logging
-2aab02a feat(S1): Slack OAuth — issue signed state, verify in callback, validate response
-d3129960 feat(S1): Gmail OAuth — issue signed state, verify in callback, validate response
-48a9fd9 refactor(S1): ConnectorViewModel uses TokenVault + accepts injected clients
-00641c9 feat(S1): EmailIndexRepository.upsert_many — chunked commits
-b063833 feat(S1): fail-loud startup if connectors enabled without ENCRYPTION_KEY
-0ea8070 feat(S1): DI providers — get_token_vault, get_context_service, get_nonce_store
-26d4c86 fix(S1): harden oauth_state against malformed payloads (review C1/C2/I1)
-eb4ccd7 feat(S1): OAuth state — HMAC-signed, time-limited, single-use via NonceStore
-bce3fd8 feat(S1): TokenVault with fail-loud encrypt/decrypt and InvalidToken handling
-47c46c0 feat(S1): scaffold infrastructure/security package
-80d7dd6 feat(S1): add structured error hierarchy for M16-M20 hardening
-1ad5807 plan(S1): implementation plan for M16-M20 backend hardening
-4aa10f8 spec(S1): M16-M20 backend hardening design
-```
-
-22 commits, 1 day of work. Two-stage subagent review (spec compliance + code quality on Sonnet for security-critical tasks) caught 5 bugs that surface-level spec review missed — most notably the OAuth-state nonce-burning issue on bad agency_id (`UUID(payload["agency_id"])` ran AFTER `mark_seen`, so a parse failure would brick retry within the TTL window).
-
-**To merge:** `git merge --ff-only worktree-m16-m20-s1-backend-hardening` from main, then `git push origin main`. Auto-deploy will pick it up. Since all behavior is gated on connector secrets being present (which they aren't yet in prod), this is safe to ship immediately.
-
-### Option C — Production hardening
-
-- **Dedicated AWS IAM user** — currently NUPROP runs against the `karthik` personal account's keys. Create `nuprop-bedrock-prod` IAM user with `bedrock:InvokeModel` + `bedrock:InvokeModelWithResponseStream` on the three Sonnet/Opus/Haiku model ARNs, generate keys, rotate Fly secrets. ~15 min.
-- **Neon region migration** — currently us-east-1; ~200ms RTT from Fly Mumbai. Recreate in Singapore (`ap-southeast-1`) for ~30ms RTT, use Neon's branching to migrate without downtime. ~20 min.
-- **CLAUDE.md note about `.local` TLD** — the email validator rejects it. Add to the project's developer notes so future testers default to `@example.com`. ~1 min.
-
----
-
-## Architecture quick-reference (don't relearn these)
-
-### Ideation side-channel design
-
-- `IdeationService.run_ideation` is **read-only by construction** — instantiates `ProposalRepository` but never calls `update`. Two tests assert this with before/after fingerprints (`test_run_ideation_does_not_mutate_proposal_fields`, `test_run_ideation_task_does_not_touch_pipeline_state`).
-- The worker's `_run_ideation_phase` handles its own try/except, does NOT call `_set_job_status` (that touches `pipeline_state` which is reserved for the main pipeline). On failure: writes a `system/error` chat row to the ideation channel AND publishes a `new_message` event (so the drawer renders the error in real time) AND a `pipeline_error` event (observability).
-- **Commit-before-broadcast** is the architectural invariant from the 2026-05-15 worker rewrite. Test `test_run_ideation_commits_before_broadcasting` installs a spy on `publish` that opens a fresh session inside the callback and asserts the row is already visible — if anyone reorders the commit and the publish, this test fails immediately.
-- The system prompt has prompt-caching enabled via `cache_control: {"type": "ephemeral"}` on the proposal-context block. For a developed proposal it can hit 6-8k tokens; turn 2+ gets ~85% input-token cost reduction and ~1s faster TTFT.
-
-### Frontend store routing
-
-- `messages` and `ideationMessages` are two parallel slices. **Both** `addMessage` and `updateMessage` route by `msg.channel === 'ideation'`. Same for `mergeIdeationMessages` (O(n) batch dedup added today; used by drawer hydration).
-- `isTyping` and `isIdeationTyping` are two independent scalars. WS `typing` events route by `data.channel` (defaults to `'main'` when omitted — back-compat). `new_message` arrival clears the typing flag for its own channel.
-- `setMessages` is main-channel-only by design (used by initial hydration of the main pipeline).
-
-### Worker / WS plumbing
-
-- Ideation enqueues with idempotency key `{proposal_id}:run_ideation:{user_msg.id}` — every user turn is a fresh ARQ job (no idempotent dropping).
-- Main pipeline gates use the bare `{proposal_id}:{phase}` form to prevent double-clicks.
-- `ws_publish_spy` fixture in conftest patches `publish` in three places: `events.publish`, `pipeline_service.publish`, AND `ideation_service.publish`. Without the third, ideation-side tests opted into the spy would get unintercepted publishes.
-
-### WS event types
-
-- `new_message` — fresh chat message; carries `channel` field; frontend routes by `channel`.
-- `message_updated` — existing message's full state changed; **also** routes by channel (Task 13 fix).
-- `typing` — typing-indicator toggle. **NEW today:** carries optional `channel` field; routes between `isTyping` and `isIdeationTyping`.
-- `phase_change` — main pipeline's `current_phase` changed. Ideation does NOT emit this.
-- `progress` — per-phase progress for phases without structured activity logs (cost_model, narrative, outputs).
-- `pipeline_error` — terminal phase failure. **NEW today:** ideation emits `phase: "ideation"` (not `"run_ideation"` — the function name). Frontend's `use-websocket.ts` has a `console.warn` handler. The user-facing error message arrives as a separate `new_message` with `role=system, extra_data.kind="error"`.
-
----
-
-## Gotchas that are easy to forget
-
-### Production deploy traps (NEW today)
-
-- **Upstash requires TLS.** REDIS_URL must use `rediss://` (two s's). Plain `redis://` opens TCP but Upstash drops the connection server-side. Symptom: `redis.exceptions.ConnectionError: Connection closed by server` and the FastAPI lifespan exits with code 3.
-- **asyncpg uses `?ssl=require`, NOT `?sslmode=require`.** SQLAlchemy's asyncpg dialect doesn't translate the libpq-form. The Neon URL pasted from their dashboard uses `?sslmode=require` (and gets shortened to `?sslmode=req` in their UI for some reason); rewrite it.
-- **A crash-looping Fly machine holds its lease.** While the app is in a startup crash loop, `fly secrets set` cannot acquire the machine's lease to apply new secrets. If you're stuck: kill the running `fly deploy` first, then re-stage and re-deploy.
-- **`fly secrets deploy` refuses if no machine is in a "deployed" state.** After cancelling a failed deploy, only full `fly deploy` (not the cheaper `fly secrets deploy`) can apply new secrets.
-- **Rolling deploys leave the failed machine on the OLD image** when its lease can't be acquired. Force a full replacement with a fresh `fly deploy` after the lease conflict clears.
-
-### Worktree subagent contamination
-
-- Bash `cwd` persists between calls. If a frontend-task subagent runs `cd /Users/karthikramesh/Developer/nuprop/frontend` instead of `cd .../.claude/worktrees/<branch>/frontend`, every subsequent file write goes to the MAIN checkout. Commits land on `main`, not the worktree branch.
-- Mitigation that worked: every subagent prompt prefixed with — "ALWAYS prefix `cd frontend && ...` with the FULL worktree path. Before commit, run `git branch --show-current` and confirm. If `main`, STOP and report BLOCKED."
-- Detection: implementer's test count comes back wrong (e.g., 103 instead of 106 because the main checkout lacks the worktree's prior tasks).
-- Recovery: cherry-pick the misplaced commit to the worktree, `git stash` any unrelated working-tree changes on main, `git reset --hard <pre-mistake>`, restore stash.
-
-### Postgres uses VARCHAR(36), not native UUID
-Unchanged across sessions. Pass strings, not UUID objects, to anything that compares ID columns. `BaseRepository._coerce_id` always `str()`s.
-
-### ARQ behavior
-Bare `raise` does NOT auto-retry. Both `_run_phase` (main pipeline) and `_run_ideation_phase` (ideation) treat every exception as terminal — write a failure marker, emit a WS event, return cleanly so ARQ marks the job done.
-
-### Bedrock model IDs (verified)
-```
-Heavy    : global.anthropic.claude-opus-4-7
-Balanced : global.anthropic.claude-sonnet-4-6        (NOT -v1)
-Fast     : global.anthropic.claude-haiku-4-5-20251001-v1:0
-```
-Ideation uses `Tier.BALANCED` (Sonnet 4.6). Brief intake now uses `Tier.FAST` (Haiku 4.5) as of `0ef10dd`.
-
-### Opus 4.7 constraints
-No `temperature`/`top_p`/`top_k`. `thinking={"type": "adaptive"}` only. `AIService._build_kwargs` strips these when `tier == Tier.HEAVY`. If anything ever flips ideation from BALANCED to HEAVY, also strip `temperature=0.7` from the `messages_create` call — see the inline comment in `ideation_service.py`.
-
-### Email validator footgun
-The Pydantic `EmailStr` rejects `.local` TLD ("the part after the @-sign is a special-use or reserved name"). For local smoke testing, use `@example.com` / `@example.test` / `@example.org`.
-
-### `_no_network` test guard
-`backend/tests/conftest.py:_no_network` patches `AnthropicClient.complete/.complete_json/.stream/.is_configured` so accidental real API calls fail loudly. Tests that exercise an AI path monkeypatch the service method or `get_ai_service` directly — those patches apply after the autouse guard and win.
+| Fly config | `fly.toml` (secrets via `fly secrets list -a nuprop`) |
+| Auto-deploy workflow | `.github/workflows/deploy.yml` |
+| **Rate-card wizard components (NEW)** | `frontend/src/components/rate-card-wizard/` |
 
 ---
 
 ## How to resume next session
 
 1. Read this file end-to-end (~3 min).
-2. Run the "Quick verification" block above. All four checks should pass.
-3. `~/.claude/projects/-Users-karthikramesh-Developer-nuprop/memory/session_handoff_2026_05_16.md` is the in-memory pointer to this doc and contains the same quick-verification block.
-4. Pick from "Next session" above:
-   - **A (auto-deploy)** if you want to remove the manual `fly deploy` step.
-   - **B (M16 or the connector trio)** for product progress.
-   - **C (production hardening)** for the security/perf knobs.
-5. The codebase is in its cleanest state in weeks. No bugs, no open work, no uncommitted state, all tests green, production live.
+2. Run the "Quick verification" block above (60 seconds of bash).
+3. Pick from "START HERE":
+   - **P6 smoke + wizard smoke** (10 min in browser) → catches anything broken since deploy.
+   - **Rotate secrets** (10 min in OAuth consoles) → cleanup chat exposure.
+   - **Worktree cleanup** (1 min) → tidy `.claude/worktrees/`.
+   - **S5 brainstorm** (start of a 1.5d backend slice).
+
+Recommended order: smoke → rotation → cleanup → S5.
