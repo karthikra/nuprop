@@ -62,7 +62,7 @@ describe('OfferingsStep', () => {
     expect(screen.getByText(/BI · Brand Identity/i)).toBeInTheDocument()
     expect(screen.getByLabelText(/offering name/i)).toHaveValue('Brand Identity')
     expect(screen.getByLabelText(/offering code/i)).toHaveValue('BI')
-    expect(screen.getByText('Logo Design')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Logo Design')).toBeInTheDocument()
   })
 
   it('updates the offering name when the right-pane name input is edited', async () => {

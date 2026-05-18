@@ -160,8 +160,6 @@ export function OfferingsStep({ value, onChange }: Props) {
                 {Object.entries(selected.packages).map(([pkgKey, pkg]) => (
                   <tr key={pkgKey}>
                     <td className="py-2 pr-2">
-                      {/* Visible text for getByText queries; input is for rename-on-blur. */}
-                      <span className="sr-only">{prettify(pkgKey)}</span>
                       <input
                         type="text"
                         aria-label={`Package name ${pkgKey}`}
