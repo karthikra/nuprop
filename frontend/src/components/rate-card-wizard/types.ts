@@ -1,7 +1,7 @@
 import type { Offering, Multiplier } from '../../types/rate-card'
 
 /** The exact JSON shape posted to `POST /agencies/me/onboarding` with step=2. */
-export interface RateCardPayload {
+export interface RateCardPayload extends Record<string, unknown> {
   version: string
   offerings: Record<string, Offering>
   hourly_rates: Record<string, number>
