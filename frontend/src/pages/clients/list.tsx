@@ -22,7 +22,7 @@ export function ClientListPage() {
     createClient.mutate(data, { onSuccess: () => setShowForm(false) })
   }
 
-  const handleDiscoveryComplete = (_summary: { created: number }) => {
+  const handleDiscoveryComplete = () => {
     setDiscoveryOpen(false)
     queryClient.invalidateQueries({ queryKey: ['clients'] })
   }
