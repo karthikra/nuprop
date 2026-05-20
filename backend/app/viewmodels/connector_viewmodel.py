@@ -19,11 +19,10 @@ from app.infrastructure.external.gmail_client import GmailClient
 from app.infrastructure.external.slack_client import SlackClient
 from app.infrastructure.security.token_vault import TokenVault
 from app.services.ai.email_classifier import EmailClassifier
+from app.services.connectors.discovery_aggregator import FREEMAIL_DOMAINS
 from app.viewmodels.shared.viewmodel import ViewModelBase
 
 logger = logging.getLogger(__name__)
-
-FREEMAIL_DOMAINS = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com", "aol.com", "protonmail.com"}
 
 
 class ConnectorViewModel(ViewModelBase):
