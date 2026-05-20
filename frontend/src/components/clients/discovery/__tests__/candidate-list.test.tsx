@@ -14,7 +14,7 @@ const C: Candidate = {
   last_date: '2026-05-18T00:00:00Z',
 }
 
-const D: Candidate = { ...C, domain: 'tatacomms.com', suggested_name: 'Tatacomms', message_count: 32 }
+const D: Candidate = { ...C, domain: 'tatacomms.com', suggested_name: 'Tatacomms', message_count: 32, sender_count: 2 }
 
 const RESPONSE: DiscoveryResponse = {
   candidates: [C, D],
