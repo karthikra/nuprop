@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.services.connectors.discovery_aggregator import (
-    SAAS_NOISE_DOMAINS,
     aggregate,
     suggest_name_from_domain,
 )
@@ -86,8 +85,10 @@ def test_aggregate_filters_freemail_sender() -> None:
 
 
 def test_aggregate_filters_saas_noise_sender() -> None:
+    # 'support@' is a real human-looking local-part, so this exercises the
+    # SAAS_NOISE_DOMAINS branch specifically (not the no-reply branch).
     out = aggregate(
-        [msg(from_=f"notifications@{next(iter(SAAS_NOISE_DOMAINS))}")],
+        [msg(from_="support@github.com")],
         own_domain=None,
         excluded_domains=set(),
     )
