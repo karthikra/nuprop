@@ -95,5 +95,5 @@ async def test_discover_clients_handles_decrypt_failure() -> None:
 
     resp = await vm.discover_clients(agency.id, lookback_days=90)
     assert resp.candidates == []
-    assert vm.status_code == 401
+    assert vm.status_code == 400
     assert "decrypt" in vm.error.lower() or "reconnect" in vm.error.lower()

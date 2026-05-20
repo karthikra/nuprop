@@ -52,13 +52,13 @@ describe('ClientDiscoveryFlow', () => {
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith({ created: 1 }))
   })
 
-  it('shows an error message when the discover call fails with 401', async () => {
+  it('shows an error message when the discover call fails with 400', async () => {
     const user = userEvent.setup()
     server.use(
       http.post(`${API}/connectors/gmail/discover-clients`, async () =>
         HttpResponse.json(
           { detail: 'Stored Gmail credentials could not be decrypted; please reconnect' },
-          { status: 401 },
+          { status: 400 },
         ),
       ),
     )
