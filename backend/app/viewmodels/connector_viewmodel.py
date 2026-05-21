@@ -224,7 +224,7 @@ class ConnectorViewModel(ViewModelBase):
             refresh_token = self._decrypt(gmail["refresh_token"])
         except TokenVaultError:
             self.error = "Stored Gmail credentials could not be decrypted; please reconnect"
-            self.status_code = 401
+            self.status_code = 400
             return {}
 
         try:
@@ -235,7 +235,7 @@ class ConnectorViewModel(ViewModelBase):
                 extra={"event": "connector.gmail.refresh_failed"},
             )
             self.error = "Failed to refresh Google access token; please reconnect"
-            self.status_code = 401
+            self.status_code = 400
             return {}
 
         clients = await self.client_repo.search(agency_id, limit=500)
