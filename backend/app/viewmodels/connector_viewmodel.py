@@ -19,11 +19,11 @@ from app.infrastructure.external.gmail_client import GmailClient
 from app.infrastructure.external.slack_client import SlackClient
 from app.infrastructure.security.token_vault import TokenVault
 from app.services.ai.email_classifier import EmailClassifier
+from app.domain.schemas.discovery_schemas import DiscoveryResponse
+from app.services.connectors.discovery_aggregator import FREEMAIL_DOMAINS, aggregate
 from app.viewmodels.shared.viewmodel import ViewModelBase
 
 logger = logging.getLogger(__name__)
-
-FREEMAIL_DOMAINS = {"gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com", "aol.com", "protonmail.com"}
 
 
 class ConnectorViewModel(ViewModelBase):
@@ -358,6 +358,82 @@ class ConnectorViewModel(ViewModelBase):
             "domains_synced": synced_domains,
             "duration_seconds": duration,
         }
+
+    async def discover_clients(
+        self, agency_id: UUID, lookback_days: int,
+    ) -> DiscoveryResponse:
+        start = time.time()
+
+        agency = await self.agency_repo.get_by_id(agency_id)
+        if not agency:
+            self.error = "Agency not found"
+            self.status_code = 404
+            return DiscoveryResponse()
+
+        gmail = (agency.settings or {}).get("gmail", {})
+        if not gmail.get("connected") or not gmail.get("refresh_token"):
+            self.error = "Gmail not connected"
+            self.status_code = 400
+            return DiscoveryResponse()
+
+        try:
+            refresh_token = self._decrypt(gmail["refresh_token"])
+        except TokenVaultError:
+            self.error = "Stored Gmail credentials could not be decrypted; please reconnect"
+            self.status_code = 400
+            return DiscoveryResponse()
+
+        try:
+            access_token = await self._gmail.refresh_access_token(refresh_token)
+        except Exception:
+            logger.exception(
+                "gmail.refresh_access_token failed during discovery",
+                extra={"event": "connector.discovery.refresh_failed"},
+            )
+            self.error = "Failed to refresh Google access token; please reconnect"
+            self.status_code = 400
+            return DiscoveryResponse()
+
+        # Per-window limits chosen to bound Gmail API calls. See spec.
+        limit_for_window = {30: 500, 90: 1500, 365: 3000}[lookback_days]
+
+        try:
+            messages = await self._gmail.fetch_recent_messages(
+                access_token, lookback_days=lookback_days, limit=limit_for_window,
+            )
+        except Exception:
+            logger.exception(
+                "gmail.fetch_recent_messages failed",
+                extra={"event": "connector.discovery.fetch_failed"},
+            )
+            self.error = "Couldn't scan your inbox right now. Try again in a minute."
+            self.status_code = 500
+            return DiscoveryResponse()
+
+        # Build the already-linked domain set from existing clients.
+        clients = await self.client_repo.search(agency_id, limit=500)
+        linked_domains: set[str] = set()
+        for client in clients:
+            for contact in (client.contacts or []):
+                if isinstance(contact, dict) and contact.get("email"):
+                    linked_domains.add(contact["email"].split("@")[-1].lower())
+
+        # Own domain inferred from the connected Gmail account.
+        own_email = (gmail.get("email") or "").strip()
+        own_domain = own_email.split("@")[-1].lower() if "@" in own_email else None
+
+        candidates = aggregate(
+            messages,
+            own_domain=own_domain,
+            excluded_domains=linked_domains,
+        )
+
+        return DiscoveryResponse(
+            candidates=candidates,
+            excluded_existing=len(linked_domains),
+            scanned_messages=len(messages),
+            duration_seconds=round(time.time() - start, 2),
+        )
 
     async def _persist_gmail_watermark(
         self, agency_id: UUID, per_domain: dict[str, str],

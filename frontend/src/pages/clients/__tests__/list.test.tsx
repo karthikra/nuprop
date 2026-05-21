@@ -7,6 +7,51 @@ import { API } from '../../../test/mocks/handlers'
 import { renderWithProviders } from '../../../test/utils'
 import { ClientListPage } from '../list'
 
+describe('ClientListPage discovery integration', () => {
+  it('empty state shows BOTH CTAs when Gmail is connected', async () => {
+    server.use(
+      http.get(`${API}/clients`, async () => HttpResponse.json([])),
+      http.get(`${API}/connectors/gmail/status`, async () =>
+        HttpResponse.json({ connected: true, email: 'me@veeville.com' }),
+      ),
+    )
+    renderWithProviders(<ClientListPage />)
+    await waitFor(() => expect(screen.getByText(/no clients yet/i)).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /add a client manually/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /discover from gmail/i })).toBeInTheDocument()
+  })
+
+  it('empty state shows ONLY manual CTA when Gmail is not connected', async () => {
+    server.use(
+      http.get(`${API}/clients`, async () => HttpResponse.json([])),
+      http.get(`${API}/connectors/gmail/status`, async () =>
+        HttpResponse.json({ connected: false }),
+      ),
+    )
+    renderWithProviders(<ClientListPage />)
+    await waitFor(() => expect(screen.getByText(/no clients yet/i)).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /add a client manually/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /discover from gmail/i })).not.toBeInTheDocument()
+  })
+
+  it('populated state shows the secondary Discover button when Gmail is connected', async () => {
+    server.use(
+      http.get(`${API}/clients`, async () => HttpResponse.json([
+        { id: 'c1', name: 'Acme', slug: 'acme', industry: null, size: null,
+          contacts: [], notes: null, tags: [], context_profile: {},
+          created_at: '', updated_at: '' },
+      ])),
+      http.get(`${API}/connectors/gmail/status`, async () =>
+        HttpResponse.json({ connected: true, email: 'me@veeville.com' }),
+      ),
+    )
+    renderWithProviders(<ClientListPage />)
+    await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /^add client$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /discover from gmail/i })).toBeInTheDocument()
+  })
+})
+
 const client1 = {
   id: 'c1', name: 'Northwind', slug: 'northwind', industry: 'logistics', size: 'sme',
   contacts: [], notes: null, tags: ['vip'], context_profile: {}, created_at: '', updated_at: '',

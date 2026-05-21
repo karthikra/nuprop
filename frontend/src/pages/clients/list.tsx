@@ -1,18 +1,30 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { useClients, useCreateClient, useDeleteClient } from '../../api/clients'
+import { useGmailStatus } from '../../api/connectors'
 import { ClientForm } from '../../components/clients/client-form'
+import { ClientDiscoveryFlow } from '../../components/clients/discovery'
 import type { ClientCreate } from '../../types/client'
 
 export function ClientListPage() {
   const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
+  const [discoveryOpen, setDiscoveryOpen] = useState(false)
   const { data: clients, isLoading } = useClients(search || undefined)
   const createClient = useCreateClient()
   const deleteClient = useDeleteClient()
+  const queryClient = useQueryClient()
+  const { data: gmailStatus } = useGmailStatus()
+  const gmailConnected = gmailStatus?.connected === true
 
   const handleCreate = (data: ClientCreate) => {
     createClient.mutate(data, { onSuccess: () => setShowForm(false) })
+  }
+
+  const handleDiscoveryComplete = () => {
+    setDiscoveryOpen(false)
+    queryClient.invalidateQueries({ queryKey: ['clients'] })
   }
 
   return (
@@ -22,12 +34,22 @@ export function ClientListPage() {
           <h1 className="text-2xl font-semibold text-stone-900">Clients</h1>
           <p className="mt-1 text-sm text-stone-500">{clients?.length ?? 0} clients</p>
         </div>
-        <button
-          onClick={() => setShowForm(true)}
-          className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800"
-        >
-          Add client
-        </button>
+        <div className="flex items-center gap-2">
+          {gmailConnected && (clients?.length ?? 0) > 0 && (
+            <button
+              onClick={() => setDiscoveryOpen(true)}
+              className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+            >
+              Discover from Gmail
+            </button>
+          )}
+          <button
+            onClick={() => setShowForm(true)}
+            className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800"
+          >
+            Add client
+          </button>
+        </div>
       </div>
 
       {/* Search */}
@@ -60,7 +82,23 @@ export function ClientListPage() {
         {isLoading && <p className="text-sm text-stone-400">Loading...</p>}
         {clients?.length === 0 && !isLoading && (
           <div className="rounded-xl border border-dashed border-stone-300 bg-white p-8 text-center">
-            <p className="text-sm text-stone-500">No clients yet.</p>
+            <p className="text-sm text-stone-500 mb-4">No clients yet.</p>
+            <div className="flex justify-center gap-2">
+              <button
+                onClick={() => setShowForm(true)}
+                className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800"
+              >
+                Add a client manually
+              </button>
+              {gmailConnected && (
+                <button
+                  onClick={() => setDiscoveryOpen(true)}
+                  className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+                >
+                  Discover from Gmail
+                </button>
+              )}
+            </div>
           </div>
         )}
         {clients?.map((client) => (
@@ -93,6 +131,12 @@ export function ClientListPage() {
           </div>
         ))}
       </div>
+
+      <ClientDiscoveryFlow
+        open={discoveryOpen}
+        onClose={() => setDiscoveryOpen(false)}
+        onComplete={handleDiscoveryComplete}
+      />
     </div>
   )
 }

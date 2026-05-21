@@ -14,6 +14,7 @@ from app.domain.schemas.connector_schemas import (
     GmailStatusResponse,
     GmailSyncResponse,
 )
+from app.domain.schemas.discovery_schemas import DiscoveryRequest, DiscoveryResponse
 from app.infrastructure.db.database import get_db
 from app.infrastructure.security.oauth_state import NonceStore, verify_state
 from app.viewmodels.connector_viewmodel import ConnectorViewModel
@@ -82,6 +83,18 @@ async def gmail_sync(
     if not result and vm.error:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
     return GmailSyncResponse(**result)
+
+
+@router.post("/gmail/discover-clients", response_model=DiscoveryResponse)
+async def gmail_discover_clients(
+    body: DiscoveryRequest,
+    agency_id: UUID = Depends(get_current_agency_id),
+    vm: ConnectorViewModel = Depends(get_vm),
+):
+    result = await vm.discover_clients(agency_id, lookback_days=body.lookback_days)
+    if vm.error:
+        raise HTTPException(status_code=vm.status_code, detail=vm.error)
+    return result
 
 
 @router.delete("/gmail", status_code=status.HTTP_204_NO_CONTENT)

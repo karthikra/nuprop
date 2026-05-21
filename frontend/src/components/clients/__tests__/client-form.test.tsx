@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ClientForm } from '../client-form'
-import type { Client } from '../../../types/client'
+import type { Client, ClientCreate, ContactInfo } from '../../../types/client'
 
 const existingClient: Client = {
   id: 'c1', name: 'Existing Co', slug: 'existing-co', industry: 'retail', size: 'sme',
@@ -53,5 +53,84 @@ describe('ClientForm', () => {
     render(<ClientForm onSubmit={vi.fn()} onCancel={onCancel} saving={false} />)
     await user.click(screen.getByRole('button', { name: /cancel/i }))
     expect(onCancel).toHaveBeenCalled()
+  })
+})
+
+function Wrapper({
+  initialContacts,
+  onSubmit,
+}: {
+  initialContacts?: ContactInfo[]
+  onSubmit?: (data: ClientCreate) => void
+}) {
+  return (
+    <ClientForm
+      onSubmit={onSubmit ?? (() => {})}
+      onCancel={() => {}}
+      saving={false}
+      initialContacts={initialContacts}
+    />
+  )
+}
+
+describe('ClientForm contacts editor', () => {
+  it('pre-fills contacts from initialContacts', () => {
+    render(<Wrapper initialContacts={[
+      { name: 'Jane', email: 'jane@acme.com' },
+      { name: 'Bob', email: 'bob@acme.com' },
+    ]} />)
+    expect(screen.getByDisplayValue('Jane')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('jane@acme.com')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Bob')).toBeInTheDocument()
+  })
+
+  it('includes contacts in the submit payload', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(<Wrapper
+      initialContacts={[{ name: 'Jane', email: 'jane@acme.com' }]}
+      onSubmit={onSubmit}
+    />)
+    await user.type(screen.getByLabelText(/client name/i), 'Acme')
+    await user.click(screen.getByRole('button', { name: /save|create/i }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Acme',
+      contacts: [{ name: 'Jane', email: 'jane@acme.com' }],
+    }))
+  })
+
+  it('lets the user add a new contact row', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(<Wrapper onSubmit={onSubmit} />)
+    await user.type(screen.getByLabelText(/client name/i), 'Acme')
+    await user.click(screen.getByRole('button', { name: /add contact/i }))
+    const nameInputs = screen.getAllByPlaceholderText(/contact name/i)
+    const emailInputs = screen.getAllByPlaceholderText(/contact email/i)
+    await user.type(nameInputs[0], 'Carol')
+    await user.type(emailInputs[0], 'carol@acme.com')
+    await user.click(screen.getByRole('button', { name: /save|create/i }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      contacts: [{ name: 'Carol', email: 'carol@acme.com' }],
+    }))
+  })
+
+  it('lets the user remove a contact row', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(<Wrapper
+      initialContacts={[
+        { name: 'Jane', email: 'jane@acme.com' },
+        { name: 'Bob', email: 'bob@acme.com' },
+      ]}
+      onSubmit={onSubmit}
+    />)
+    await user.type(screen.getByLabelText(/client name/i), 'Acme')
+    const removeButtons = screen.getAllByRole('button', { name: /remove contact/i })
+    await user.click(removeButtons[1])
+    await user.click(screen.getByRole('button', { name: /save|create/i }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      contacts: [{ name: 'Jane', email: 'jane@acme.com' }],
+    }))
   })
 })

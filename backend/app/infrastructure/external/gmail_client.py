@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode
 
@@ -175,6 +175,54 @@ class GmailClient:
                         "gmail get_message failed for one ref; skipping",
                         extra={
                             "event": "connector.gmail.message_fetch_failed",
+                            "ref_id": ref.get("id"),
+                            "error": str(exc),
+                        },
+                    )
+                    continue
+
+            if not page_token:
+                break
+
+        return all_messages
+
+    async def fetch_recent_messages(
+        self,
+        access_token: str,
+        lookback_days: int,
+        limit: int,
+    ) -> list[dict]:
+        """Fetch up to `limit` recent messages from the last `lookback_days`.
+
+        No domain filter -- caller filters/aggregates downstream. Uses the same
+        log-and-skip pattern as fetch_messages_for_domain for individual
+        get_message failures.
+        """
+        from datetime import timedelta
+
+        since = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        query = f"after:{since.strftime('%Y/%m/%d')}"
+
+        all_messages: list[dict] = []
+        page_token: str | None = None
+
+        while len(all_messages) < limit:
+            batch_size = min(100, limit - len(all_messages))
+            msg_refs, page_token = await self.search_messages(
+                access_token, query, batch_size, page_token,
+            )
+
+            for ref in msg_refs:
+                if len(all_messages) >= limit:
+                    break
+                try:
+                    msg = await self.get_message(access_token, ref["id"])
+                    all_messages.append(msg)
+                except (httpx.HTTPError, KeyError, ValueError) as exc:
+                    logger.warning(
+                        "gmail get_message failed during discovery scan; skipping",
+                        extra={
+                            "event": "connector.gmail.discovery_message_fetch_failed",
                             "ref_id": ref.get("id"),
                             "error": str(exc),
                         },
