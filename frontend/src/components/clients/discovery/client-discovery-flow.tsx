@@ -19,6 +19,7 @@ type Phase =
   | { kind: 'scanning' }
   | { kind: 'list'; response: DiscoveryResponse }
   | { kind: 'wizard'; selected: Candidate[] }
+  | { kind: 'done'; created: number }
   | { kind: 'error'; message: string }
 
 export function ClientDiscoveryFlow({ open, onClose, onComplete }: Props) {
@@ -44,7 +45,7 @@ export function ClientDiscoveryFlow({ open, onClose, onComplete }: Props) {
   }
 
   const handleSkipAll = () => {
-    onComplete({ created: 0 })
+    setPhase({ kind: 'done', created: 0 })
   }
 
   const handleSaveClient = async (data: ClientCreate) => {
@@ -52,7 +53,7 @@ export function ClientDiscoveryFlow({ open, onClose, onComplete }: Props) {
   }
 
   const handleWizardComplete = ({ created }: { created: number }) => {
-    onComplete({ created })
+    setPhase({ kind: 'done', created })
   }
 
   return (
@@ -79,6 +80,28 @@ export function ClientDiscoveryFlow({ open, onClose, onComplete }: Props) {
             onSaveClient={handleSaveClient}
             onComplete={handleWizardComplete}
           />
+        )}
+        {phase.kind === 'done' && (
+          <div className="space-y-3">
+            <h2 className="text-lg font-semibold text-stone-900">
+              {phase.created > 0
+                ? `Created ${phase.created} ${phase.created === 1 ? 'client' : 'clients'}`
+                : 'No clients created'}
+            </h2>
+            <p className="text-sm text-stone-600">
+              {phase.created > 0
+                ? 'They now appear in your client list.'
+                : 'Nothing was added. You can run discovery again any time.'}
+            </p>
+            <div className="flex justify-end">
+              <button
+                onClick={() => onComplete({ created: phase.created })}
+                className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800"
+              >
+                Done
+              </button>
+            </div>
+          </div>
         )}
         {phase.kind === 'error' && (
           <div className="space-y-3">

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode
 
@@ -200,7 +200,7 @@ class GmailClient:
         """
         from datetime import timedelta
 
-        since = datetime.utcnow() - timedelta(days=lookback_days)
+        since = datetime.now(timezone.utc) - timedelta(days=lookback_days)
         query = f"after:{since.strftime('%Y/%m/%d')}"
 
         all_messages: list[dict] = []

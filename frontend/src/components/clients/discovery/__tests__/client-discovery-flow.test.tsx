@@ -49,7 +49,10 @@ describe('ClientDiscoveryFlow', () => {
     expect(await screen.findByText(/reviewing 1 of 1/i)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /save & finish/i }))
 
-    await waitFor(() => expect(onComplete).toHaveBeenCalledWith({ created: 1 }))
+    await waitFor(() => expect(screen.getByText(/created 1 client/i)).toBeInTheDocument())
+    expect(onComplete).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: /done/i }))
+    expect(onComplete).toHaveBeenCalledWith({ created: 1 })
   })
 
   it('shows an error message when the discover call fails with 400', async () => {
@@ -81,6 +84,9 @@ describe('ClientDiscoveryFlow', () => {
     await user.click(screen.getByRole('button', { name: /90 days/i }))
     await waitFor(() => expect(screen.getByText('Acme')).toBeInTheDocument())
     await user.click(screen.getByRole('button', { name: /skip all/i }))
+    await waitFor(() => expect(screen.getByText(/no clients created/i)).toBeInTheDocument())
+    expect(onComplete).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: /done/i }))
     expect(onComplete).toHaveBeenCalledWith({ created: 0 })
   })
 })

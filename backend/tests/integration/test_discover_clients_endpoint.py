@@ -108,3 +108,17 @@ async def test_discover_endpoint_422_on_invalid_lookback(
         json={"lookback_days": 7},  # not in {30, 90, 365}
     )
     assert r.status_code == 422  # pydantic Literal rejects it
+
+
+@pytest.mark.asyncio
+async def test_discover_endpoint_400_when_gmail_not_connected(
+    client, registered,
+) -> None:
+    """A registered agency with no Gmail connection gets a 400, not a 401
+    (400 avoids the frontend's global 401-logout interceptor)."""
+    r = await client.post(
+        f"{API}/connectors/gmail/discover-clients",
+        headers=registered.headers,
+        json={"lookback_days": 90},
+    )
+    assert r.status_code == 400
