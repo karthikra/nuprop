@@ -75,21 +75,8 @@ class PipelineService:
         return None
 
     async def _load_context_brief(self, proposal) -> str | None:
-        try:
-            from app.infrastructure.db.models.client import Client
-            from app.services.context_service import ContextService
-            result = await self.session.execute(
-                select(Client).where(Client.id == str(proposal.client_id))
-            )
-            client_row = result.scalar_one_or_none()
-            if client_row and client_row.context_profile:
-                client_name = proposal.brief.get("client", {}).get("name", "the client")
-                return await ContextService().generate_context_brief(
-                    client_name, client_row.context_profile
-                )
-        except Exception:  # noqa: BLE001 — context is best-effort
-            logger.exception("context brief load failed")
-        return None
+        from app.services.context_service import get_or_create_proposal_brief
+        return await get_or_create_proposal_brief(self.session, proposal)
 
     async def analyze_brief(self, proposal_id: UUID | str) -> None:
         """Brief-intake phase. Extracted from ChatViewModel._handle_brief_phase."""
@@ -106,7 +93,12 @@ class PipelineService:
             and m.message_type == MessageType.TEXT.value
         ]
 
-        result = await BriefAnalyzer().analyze(chat_history=chat_history, current_brief=proposal.brief)
+        context_brief = await self._load_context_brief(proposal)
+        result = await BriefAnalyzer().analyze(
+            chat_history=chat_history,
+            current_brief=proposal.brief,
+            context_brief=context_brief,
+        )
 
         msg_type = MessageType.TEXT.value
         extra_data: dict = {}
@@ -281,6 +273,13 @@ class PipelineService:
             + ", ".join(categories or ["general design services"])
             + ". Search the web for real published data."
         )
+        context_brief = await self._load_context_brief(proposal)
+        if context_brief:
+            client_name = (proposal.brief or {}).get("client", {}).get("name", "the client")
+            user_msg += (
+                f"\n\n## Existing context on {client_name}\n{context_brief}\n"
+                f"Use this to focus the benchmark search on the client's actual segment."
+            )
 
         # Build the system-prompt substitutions — same pattern as BenchmarkAgent.find_benchmarks
         # (benchmark_agent.py:74-83). BENCHMARK_SYSTEM is a str.format template with
@@ -346,6 +345,9 @@ class PipelineService:
         if proposal is None:
             return
         template_config = await self._load_template_config(proposal)
+        effective_config = self._merge_preferences_into_config(
+            template_config, proposal.preferences or {}
+        )
 
         await self._emit_progress(proposal_id, "cost_model", "searching", "Building cost model from rate card...")
         model = await CostModelBuilder().build(
@@ -353,7 +355,7 @@ class PipelineService:
             db=self.session,
             agency_id=str(proposal.agency_id),
             benchmarks_md=proposal.benchmarks,
-            template_config=template_config,
+            template_config=effective_config,
         )
         cost_dict = CostModelBuilder.model_to_dict(model)
         await self.proposal_repo.update(proposal.id, cost_model=cost_dict)
@@ -422,6 +424,8 @@ class PipelineService:
             template_config, proposal.preferences or {}
         )
 
+        context_brief = await self._load_context_brief(proposal)
+
         await self._emit_progress(
             proposal_id, "narrative", "searching", "Writing covering letter (2 variants)..."
         )
@@ -440,6 +444,7 @@ class PipelineService:
             rate_card_offerings=rate_card.offerings if rate_card else None,
             standard_options=rate_card.standard_options if rate_card else 3,
             standard_revisions=rate_card.standard_revisions if rate_card else 2,
+            context_brief=context_brief,
         )
 
         await self.proposal_repo.update(

@@ -64,7 +64,7 @@ async def test_analyze_brief_persists_completed_brief_before_emitting(db, monkey
     _, _, proposal = await make_proposal_db()
     pid = proposal.id
 
-    async def fake_analyze(self, chat_history, current_brief):
+    async def fake_analyze(self, chat_history, current_brief, context_brief=None):
         return BriefAnalysisResult(
             response_text="Confirm?", brief_complete=True,
             brief_data={"client": {"name": "Acme"}},

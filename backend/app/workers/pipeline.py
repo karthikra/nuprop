@@ -16,6 +16,7 @@ from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.infrastructure.queue.events import publish
 from app.infrastructure.queue.redis import get_redis_settings
 from app.services.pipeline_service import PipelineService
+from app.workers.enrichment import enrich_context_from_emails
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,8 @@ class WorkerSettings:
     functions = [
         analyze_brief, run_research, run_benchmarks,
         build_cost_model, generate_narrative, generate_outputs,
-        run_ideation,                                  # NEW
+        run_ideation,
+        enrich_context_from_emails,
     ]
     redis_settings = get_redis_settings()
     max_tries = ARQ_MAX_TRIES

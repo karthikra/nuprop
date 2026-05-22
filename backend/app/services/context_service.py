@@ -235,3 +235,39 @@ ONLY add genuinely new information. Do not repeat what's already in the profile.
             )
 
         return context_profile
+
+
+async def get_or_create_proposal_brief(session, proposal) -> str | None:
+    """Return the proposal's context brief, generating + persisting it on first need.
+
+    Pipeline phases run as separate ARQ jobs, so the brief must live on the
+    Proposal row to be shared. First caller pays one LLM call + commit; later
+    callers (and retries) read the persisted column. Best-effort: any failure
+    returns None and the caller proceeds without context.
+    """
+    if proposal.context_brief is not None:
+        return proposal.context_brief
+
+    try:
+        from sqlalchemy import select
+        from app.infrastructure.db.models.client import Client
+
+        result = await session.execute(
+            select(Client).where(Client.id == str(proposal.client_id))
+        )
+        client_row = result.scalar_one_or_none()
+        if not client_row or not client_row.context_profile:
+            return None
+
+        client_name = (proposal.brief or {}).get("client", {}).get("name", "the client")
+        brief = await ContextService().generate_context_brief(
+            client_name, client_row.context_profile
+        )
+        if brief:
+            proposal.context_brief = brief
+            await session.commit()
+            return brief
+        return None
+    except Exception:  # noqa: BLE001 — context is best-effort, never blocks a proposal
+        logger.exception("get_or_create_proposal_brief failed")
+        return None

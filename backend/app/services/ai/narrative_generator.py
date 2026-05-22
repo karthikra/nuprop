@@ -35,6 +35,8 @@ COVERING_LETTER_SYSTEM = """You are writing a proposal covering letter for {agen
 
 {voice_section}
 
+{context_section}
+
 STRATEGY: {strategy}
 {strategy_description}
 
@@ -195,11 +197,13 @@ class NarrativeGenerator:
         rate_card_offerings: dict | None,
         standard_options: int = 3,
         standard_revisions: int = 2,
+        context_brief: str | None = None,
     ) -> NarrativeResult:
         """Generate all narrative sections."""
         # Letters (parallel)
         primary, alt, p_strat, a_strat = await self.generate_covering_letters(
             brief, research or "", template_config, agency_name, agency_voice,
+            context_brief=context_brief,
         )
 
         # Exec summary
@@ -241,6 +245,7 @@ class NarrativeGenerator:
     async def generate_covering_letters(
         self, brief: dict, research: str, template_config: dict | None,
         agency_name: str, agency_voice: str | None,
+        context_brief: str | None = None,
     ) -> tuple[str, str, str, str]:
         """Returns (primary_text, alt_text, primary_strategy, alt_strategy)."""
         narr_cfg = (template_config or {}).get("narrative", {})
@@ -258,12 +263,17 @@ class NarrativeGenerator:
         deliverables = ", ".join(d.get("category", "") for d in project.get("deliverables", []))
 
         voice_section = f"VOICE PROFILE:\n{agency_voice}" if agency_voice else ""
+        context_section = (
+            f"CLIENT CONTEXT (from past interactions):\n{context_brief}"
+            if context_brief else ""
+        )
 
         async def _gen_letter(strategy: str) -> str:
             strat_info = LETTER_STRATEGIES.get(strategy, LETTER_STRATEGIES["confident"])
             prompt = COVERING_LETTER_SYSTEM.format(
                 agency_name=agency_name,
                 voice_section=voice_section,
+                context_section=context_section,
                 strategy=strategy,
                 strategy_description=strat_info["description"],
                 opening_instruction=opening,

@@ -74,6 +74,7 @@ class BriefAnalyzer:
         self,
         chat_history: list[dict],
         current_brief: dict,
+        context_brief: str | None = None,
     ) -> BriefAnalysisResult:
         """Process chat history and return the AI's response + optional completed brief.
 
@@ -82,8 +83,17 @@ class BriefAnalyzer:
         end-to-end, which matters for chat felt-latency.
         """
         messages = self._build_messages(chat_history, current_brief)
+        system = SYSTEM_PROMPT
+        if context_brief:
+            system = (
+                f"{SYSTEM_PROMPT}\n\n"
+                f"## Existing client context\n"
+                f"You already know the following about this client from past "
+                f"interactions. Use it to interpret the brief, but do not assume "
+                f"facts not stated in the conversation.\n\n{context_brief}"
+            )
         response_text = await self._client.complete(
-            system=SYSTEM_PROMPT,
+            system=system,
             messages=messages,
             model=get_settings().ANTHROPIC_HAIKU_MODEL,
             max_tokens=2048,
