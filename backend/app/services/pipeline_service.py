@@ -273,6 +273,13 @@ class PipelineService:
             + ", ".join(categories or ["general design services"])
             + ". Search the web for real published data."
         )
+        context_brief = await self._load_context_brief(proposal)
+        if context_brief:
+            client_name = (proposal.brief or {}).get("client", {}).get("name", "the client")
+            user_msg += (
+                f"\n\n## Existing context on {client_name}\n{context_brief}\n"
+                f"Use this to focus the benchmark search on the client's actual segment."
+            )
 
         # Build the system-prompt substitutions — same pattern as BenchmarkAgent.find_benchmarks
         # (benchmark_agent.py:74-83). BENCHMARK_SYSTEM is a str.format template with
