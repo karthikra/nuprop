@@ -93,7 +93,12 @@ class PipelineService:
             and m.message_type == MessageType.TEXT.value
         ]
 
-        result = await BriefAnalyzer().analyze(chat_history=chat_history, current_brief=proposal.brief)
+        context_brief = await self._load_context_brief(proposal)
+        result = await BriefAnalyzer().analyze(
+            chat_history=chat_history,
+            current_brief=proposal.brief,
+            context_brief=context_brief,
+        )
 
         msg_type = MessageType.TEXT.value
         extra_data: dict = {}
