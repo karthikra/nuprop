@@ -8,6 +8,7 @@ from urllib.parse import urlencode
 import httpx
 
 from app.core.config import get_settings
+from app.infrastructure.external._retry import request_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -43,41 +44,37 @@ class GmailClient:
         return f"{self.OAUTH_AUTH_URL}?{urlencode(params)}"
 
     async def exchange_code(self, code: str) -> dict:
-        async with httpx.AsyncClient() as client:
-            r = await client.post(self.OAUTH_TOKEN_URL, data={
-                "code": code,
-                "client_id": self._settings.GOOGLE_CLIENT_ID,
-                "client_secret": self._settings.GOOGLE_CLIENT_SECRET,
-                "redirect_uri": self._settings.GOOGLE_REDIRECT_URI,
-                "grant_type": "authorization_code",
-            })
-            r.raise_for_status()
-            return r.json()
+        r = await request_with_retry("POST", self.OAUTH_TOKEN_URL, data={
+            "code": code,
+            "client_id": self._settings.GOOGLE_CLIENT_ID,
+            "client_secret": self._settings.GOOGLE_CLIENT_SECRET,
+            "redirect_uri": self._settings.GOOGLE_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        })
+        return r.json()
 
     async def refresh_access_token(self, refresh_token: str) -> str:
-        async with httpx.AsyncClient() as client:
-            r = await client.post(self.OAUTH_TOKEN_URL, data={
-                "refresh_token": refresh_token,
-                "client_id": self._settings.GOOGLE_CLIENT_ID,
-                "client_secret": self._settings.GOOGLE_CLIENT_SECRET,
-                "grant_type": "refresh_token",
-            })
-            r.raise_for_status()
-            return r.json()["access_token"]
+        r = await request_with_retry("POST", self.OAUTH_TOKEN_URL, data={
+            "refresh_token": refresh_token,
+            "client_id": self._settings.GOOGLE_CLIENT_ID,
+            "client_secret": self._settings.GOOGLE_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+        })
+        return r.json()["access_token"]
 
     async def get_user_email(self, access_token: str) -> str:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{self.GMAIL_API}/users/me/profile",
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            r.raise_for_status()
-            return r.json()["emailAddress"]
+        r = await request_with_retry(
+            "GET",
+            f"{self.GMAIL_API}/users/me/profile",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        return r.json()["emailAddress"]
 
     async def revoke_token(self, token: str) -> None:
         try:
-            async with httpx.AsyncClient() as client:
-                await client.post(self.OAUTH_REVOKE_URL, params={"token": token})
+            await request_with_retry(
+                "POST", self.OAUTH_REVOKE_URL, params={"token": token}
+            )
         except httpx.HTTPError as exc:
             logger.warning(
                 "gmail token revoke failed (best-effort)",
@@ -93,31 +90,29 @@ class GmailClient:
         if page_token:
             params["pageToken"] = page_token
 
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{self.GMAIL_API}/users/me/messages",
-                headers={"Authorization": f"Bearer {access_token}"},
-                params=params,
-            )
-            r.raise_for_status()
-            data = r.json()
+        r = await request_with_retry(
+            "GET",
+            f"{self.GMAIL_API}/users/me/messages",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params=params,
+        )
+        data = r.json()
 
         messages = data.get("messages", [])
         next_token = data.get("nextPageToken")
         return messages, next_token
 
     async def get_message(self, access_token: str, message_id: str) -> dict:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{self.GMAIL_API}/users/me/messages/{message_id}",
-                headers={"Authorization": f"Bearer {access_token}"},
-                params={
-                    "format": "metadata",
-                    "metadataHeaders": ["From", "To", "Subject", "Date"],
-                },
-            )
-            r.raise_for_status()
-            data = r.json()
+        r = await request_with_retry(
+            "GET",
+            f"{self.GMAIL_API}/users/me/messages/{message_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={
+                "format": "metadata",
+                "metadataHeaders": ["From", "To", "Subject", "Date"],
+            },
+        )
+        data = r.json()
 
         headers = {}
         for h in data.get("payload", {}).get("headers", []):
