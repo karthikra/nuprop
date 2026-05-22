@@ -1,203 +1,173 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-21 (client discovery from Gmail shipped + deployed; S4 P6 smoke + secret rotation STILL open)
-**Latest commit on `main`:** `4b62a82` (venv-symlink cleanup) on top of `1ef5d41` (client-discovery merge commit). Pushed; auto-deploy run `26207988191` triggered.
+**Last updated:** 2026-05-22 (S5 pipeline integration shipped + deployed)
+**Latest commit on `main`:** `f073dfe` (S5 merge commit). Pushed; auto-deploy run `26272615236` triggered.
 **Working tree:** clean. On `main`. In sync with `origin/main`.
-**Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed. As of this session: **Gmail-driven client discovery** live on the `/clients` page; rate-card wizard live in onboarding step 2 (since 2026-05-18).
+**Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of this session the proposal pipeline now consumes client context (S5 — backend, not directly visible in the UI).
+
+**M16-M20 roadmap status:** S1–S5 COMPLETE. Only S6 (backend polish, deferrable) remains of the original plan.
+
+---
 
 ## 🛑 START HERE NEXT SESSION
 
-**Three browser-only smoke tests are pending. All shipped to prod, none ever clicked.** Do them in this order:
+The work is shipped; what's pending is **verification + cleanup**, all requiring you in a browser or OAuth console — none of it can be automated. Do it in this order.
 
-### 1. S4 P6 — OAuth connector smoke (open since 2026-05-17)
+### 1. Smoke tests — three features shipped to prod, none ever clicked
 
-Open https://nuprop.fly.dev → register (use `karthik.ramesh@veeville.com` or `@example.com`, NOT `.local` — Pydantic rejects it) → Settings. Walk through these 6 checks in order:
+Open https://nuprop.fly.dev → register (use `karthik.ramesh@veeville.com` or any `@example.com` — NOT a `.local` email, Pydantic rejects it).
+
+**1a. Rate-card wizard** (onboarding step 2, hit right after registration): walk the 4 sub-steps — Offerings (2a) / Hourly Rates (2b) / Multipliers (2c) / Globals (2d). Every "Skip this section" advances; on 2d "Skip" submits like Finish. Add at least one offering and a couple of hourly rates so later phases have a rate card to work with.
+
+**1b. S4 P6 — OAuth connectors** (Settings page):
 
 | # | Action | Expected |
 |---|---|---|
-| 1 | Click **Connect Gmail** | Popup → accounts.google.com → Allow → `/settings/gmail-callback` → "Gmail connected" → closes → parent shows your Gmail address + green Connected badge |
-| 2 | Click **Connect Slack** | Popup → slack.com/oauth/v2/authorize → Allow → `/settings/slack-callback` → "Slack connected" → closes → parent shows workspace name |
+| 1 | **Connect Gmail** | Popup → accounts.google.com → Allow → `/settings/gmail-callback` → "Gmail connected" → green badge + your address |
+| 2 | **Connect Slack** | Popup → slack.com/oauth/v2/authorize → Allow → `/settings/slack-callback` → "Slack connected" → workspace name |
 | 3 | **Drive** card → Sync Now | ~5s → green "Found X documents across Y clients" |
 | 4 | **Calendar** card → Sync Now | ~5s → green "Found X meetings across Y clients" |
-| 5 | **Gmail** card → Sync Now | ~15s (LLM classifies) → success alert. ⚠️ Returns "0 emails" if you have NO clients yet — Gmail sync searches BY client domain (see "Gmail sync needs clients first" gotcha below) |
+| 5 | **Gmail** card → Sync Now | ~15s → success alert. ⚠️ "0 emails" is EXPECTED if you have no clients yet — Gmail sync searches BY client domain (see "Gmail sync needs clients" gotcha below). Step 1c fixes this. |
 | 6 | **Slack** card → Sync | ~10s → green "Found X mentions across Y clients" |
 
-Debugging: `fly logs -a nuprop | grep -iE "connector|oauth|encrypt" | tail -20`
-
-Common gotchas:
-- Popup blocker — allow popups for `nuprop.fly.dev`
-- Google `redirect_uri_mismatch` — must be exactly `https://nuprop.fly.dev/settings/gmail-callback` (no trailing slash)
-- Slack "Invalid OAuth state" — S1's 10-min nonce TTL elapsed; click Connect again
-- Drive/Cal "Google not connected" — do Gmail first
-
-### 2. Client discovery smoke (NEW this session — shipped, never browser-tested)
-
-The discovery flow scans your Gmail inbox to find candidate clients. Requires Gmail connected (step 1 above). Go to `/clients`:
+**1c. Client discovery from Gmail** (`/clients`, needs Gmail connected):
 
 | Action | Expected |
 |---|---|
-| Visit `/clients` with **0 clients** + Gmail connected | Empty state shows TWO buttons: "Add a client manually" + "Discover from Gmail" |
-| Click **Discover from Gmail** | Modal: "Look back how far?" with 30 / 90 / 365-day buttons (90 highlighted) |
-| Pick a window | Spinner "Scanning your inbox…" (~3-20s depending on window) → candidate list |
-| Candidate list | One checkbox row per discovered domain: name guess, domain, email count, sender count, date range. Noise (freemail, github/linear/etc., no-reply, your own veeville.com) is filtered out |
-| Tick candidates → **Review N selected** | Sequential wizard: pre-filled ClientForm per candidate (name = domain guess, contacts = top senders). "Save & Next" / "Save & Finish" / "Skip this" |
-| After last candidate | "Created N clients" confirmation → Done → `/clients` list refreshes |
-| Populated `/clients` + Gmail connected | Header shows secondary "Discover from Gmail" button next to "Add client" |
+| `/clients` with 0 clients + Gmail connected | Empty state: "Add a client manually" + "Discover from Gmail" |
+| **Discover from Gmail** | Modal "Look back how far?" → 30/90/365 buttons (90 highlighted) |
+| Pick a window | "Scanning your inbox…" (~3-20s) → candidate list |
+| Candidate list | Checkbox rows: name guess, domain, email count, sender count, date range. Noise filtered (freemail, github/linear/etc., no-reply, your own `veeville.com`) |
+| Tick candidates → **Review N selected** | Sequential wizard, pre-filled ClientForm per candidate (name = domain guess, contacts = top senders) |
+| After last candidate | "Created N clients" → Done → `/clients` refreshes |
 
-Debugging: `fly logs -a nuprop | grep -iE "discovery|connector" | tail -20`
+Then re-run **Gmail Sync Now** (step 5) — now that clients exist, it should find real emails instead of "0 emails".
 
-### 3. Rate-card wizard smoke (open since 2026-05-18 — shipped, never browser-tested)
+**1d. S5 spot-check (optional, backend behavior).** S5 has no new UI. To eyeball it: create a client, add some context to its profile (the `/clients/:id` context section, or run a connector sync that populates the profile), then create a proposal for that client and run it through. The covering letter / research should reference the relationship. Also: after a Gmail sync, a background `enrich_context_from_emails` ARQ job runs — check `fly logs -a nuprop | grep -iE "enrich"` for `connector.enrich.client_done` events.
 
-During registration you hit onboarding step 2 — the 4-sub-step rate-card wizard (Offerings / Hourly Rates / Multipliers / Globals). Walk all 4 sub-steps; every "Skip this section" advances; on 2d "Skip" submits like Finish. Detail matrix in git history (`docs/superpowers/HANDOFF.md` at commit `eafc47f` if you need the full per-substep checklist).
+Debugging any of the above: `fly logs -a nuprop | grep -iE "connector|oauth|discovery|enrich|encrypt" | tail -30`
 
-## 🔐 After smoke tests pass — rotate secrets (chat exposure cleanup)
+Common gotchas: allow popups for `nuprop.fly.dev`; Google `redirect_uri_mismatch` → the redirect URI must be exactly `https://nuprop.fly.dev/settings/gmail-callback`; Slack "Invalid OAuth state" → 10-min nonce expired, click Connect again; Drive/Cal "Google not connected" → do Gmail first.
 
-Three secrets were pasted into AI chat transcripts during S4 P4 and need rotation:
+### 2. Rotate secrets (chat-exposure cleanup) — after smoke tests pass
+
+Three secrets were pasted into AI chat transcripts during S4 and should be rotated:
 - `GOOGLE_CLIENT_SECRET=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`
 - `SLACK_CLIENT_SECRET=fdf51ff06cedda29a2f0c27cd1f59415`
 - `ENCRYPTION_KEY=t6TjRRsjv8rqhpDf2M-kRFnhw9MGuVx9wBCu5vIYeIk=`
 
-Short version (full step-by-step in the 2026-05-18 conversation history):
-
-1. **Google:** https://console.cloud.google.com/apis/credentials → NUPROP Web Client → **Add secret** (don't reset — keep old enabled until rolling deploy confirms)
-2. **Slack:** https://api.slack.com/apps → NUPROP → Basic Information → App Credentials → **Regenerate**
+Steps:
+1. **Google:** https://console.cloud.google.com/apis/credentials → NUPROP Web Client → **Add secret** (don't reset — keep old enabled until the redeploy confirms).
+2. **Slack:** https://api.slack.com/apps → NUPROP → Basic Information → App Credentials → **Regenerate**.
 3. **Fernet:** `backend/.venv/bin/python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'`
-4. **Atomic push** (must be ONE command — S1 lifespan refuses to start if OAuth creds present without ENCRYPTION_KEY):
+4. **Atomic push** (ONE command — S1 lifespan refuses to start if OAuth creds are set without ENCRYPTION_KEY):
    ```bash
    fly secrets set -a nuprop \
      GOOGLE_CLIENT_SECRET="<new>" \
      SLACK_CLIENT_SECRET="<new>" \
      ENCRYPTION_KEY="<new fernet>"
    ```
-5. ⚠️ ENCRYPTION_KEY rotation invalidates ALL stored Gmail + Slack tokens (`connector_viewmodel.py` — both Gmail refresh tokens and Slack access tokens use the vault). After rotation, **disconnect** existing Gmail + Slack in Settings first (avoids decrypt_failed alert), then **reconnect**.
-6. Disable the old Google client secret only after re-auth confirms working.
+5. ⚠️ Rotating ENCRYPTION_KEY invalidates ALL stored Gmail + Slack tokens (the vault encrypts both). After rotation, **disconnect** then **reconnect** Gmail + Slack in Settings.
+6. Disable the old Google client secret once re-auth works.
 
-## After all that — pick next slice
+### 3. Worktree / branch cleanup (~1 min)
 
-### Cleanup (5 min)
+Check for leftover worktrees from this session: `git worktree list`. If `s5-pipeline-integration` is still listed, remove it: `git worktree remove --force .claude/worktrees/s5-pipeline-integration` then `git worktree prune`, and `git branch -d worktree-s5-pipeline-integration` (it's merged). (As of this handoff the worktree was already cleaned up — verify.)
 
-4 stale worktrees from prior sessions are still on disk:
-```bash
-git worktree remove .claude/worktrees/m16-m20-s1-backend-hardening
-git worktree remove .claude/worktrees/m16-m20-s2-context-ui
-git worktree remove .claude/worktrees/m16-m20-s3-connector-frontend
-git worktree remove .claude/worktrees/m16-m20-s4-prod-oauth
-git worktree prune
-```
-All 4 are already merged into main. Delete the branches too if you want: `git branch -D worktree-m16-m20-s1-backend-hardening` etc.
+### 4. Pick the next slice
 
-### S5 — Pipeline integration (~1.5d, all backend)
-
-The biggest semantic slice in the M16-M20 roadmap. Goal: make the proposal pipeline actually CONSUME the context + connector data S1-S4 set up.
-
-Open questions to brainstorm:
-- Which of the 5 unwired pipeline phases get `context_brief` access first? (analyze_brief, run_research, run_benchmarks, build_cost_model, generate_narrative — only `run_ideation` consumes it today)
-- Should `build_cost_model` read `proposal.preferences` directly, or via a normalized lookup in PipelineContext?
-- Post-sync email auto-enrichment — trigger via webhook from connector sync, or a separate ARQ job?
-
-Suggested next-session opener: invoke `superpowers:brainstorming` with target "wire context_brief and connector data into the 5 unwired pipeline phases (S5)".
-
-### S6 — Backend polish (~1d, deferrable)
-
-- ContextBriefToggle local cache survives invalidation (S2 follow-up)
-- `getAuthUrl.isError` / `disconnectSlack.isError` surfacing in connector cards (S3 follow-up)
-- Yellow-notice timed strip for the rate-card wizard's soft-required skip (`docs/superpowers/specs/2026-05-18-rate-card-form-design.md`)
-
-### Client-discovery follow-ups (deferred, documented in its spec)
-
-- LLM-powered company naming (heuristic-only today — `acme.com` → `Acme`, `tatacomms.com` → `Tatacomms`)
-- Industry/size auto-detection from email content
-- Background scheduled discovery cron
-- `sync_emails` still returns **401** for stale Gmail creds (only `discover_clients` was fixed to **400** — the global axios 401-interceptor logs the user out, see lesson #2 below). `sync_emails` should get the same 400 treatment in a small follow-up.
+- **S6 — backend polish** (~1d, deferrable): ContextBriefToggle cache survives invalidation (S2 follow-up); `getAuthUrl.isError`/`disconnectSlack.isError` surfacing in connector cards (S3 follow-up); rate-card wizard's timed yellow skip-notice; retry/backoff on connector calls.
+- **`sync_emails` is fine** — its 401→400 fix already shipped 2026-05-21.
+- **`pricing_model`** — S5 carries it in the merged config but `CostModelBuilder` doesn't branch on it (no alternative pricing path exists). If you want it to actually do something, that's a fresh design conversation: *what is the alternative pricing model?*
+- Other future-work items are listed in each slice's spec under "Future work".
 
 ---
 
-## What happened this session (2026-05-21)
+## What happened this session (2026-05-22)
 
-Shipped **client discovery from Gmail** end-to-end: brainstorm → spec → 13-task plan → subagent-driven execution → final review → `--no-ff` merge → push → deploy.
+Shipped **S5 — pipeline integration**, the biggest semantic slice of the M16-M20 roadmap: brainstorm → spec → 10-task plan → subagent-driven execution → final review → `--no-ff` merge → push → deploy.
 
-The feature solves a chicken-and-egg problem found while debugging "Gmail connector gives me zero mails": Gmail sync searches BY client domain, so a fresh agency with no clients gets 0 results forever. Discovery flips it — scan the inbox, propose candidate clients, bulk-create them.
+S5 makes the proposal pipeline actually USE the client context that S1-S4 collected. Before S5, of 7 pipeline phases only `run_research` consumed client context; the rest generated proposals as if the agency knew nothing about the client.
 
-### This session's commits (on main, deployed)
+### Commits (on main, deployed)
 
 ```
-4b62a82 fix: drop accidentally-committed backend/.venv symlink, harden gitignore
-1ef5d41 Merge: client discovery from Gmail        (--no-ff merge commit)
-  └─ 16 feature commits 5d51aeb..e08cdfb (squash-readable in `git log 1ef5d41^2`)
-e08cdfb fix(discovery): show created-count confirmation, fix utcnow deprecation, add 400-path test
+f073dfe Merge: S5 pipeline integration            (--no-ff merge commit)
+  └─ 12 S5 commits 1df9af9..5251ef9
+5251ef9 fix(S5): stamp _sources[email] on context profile after enrichment
+eb788c0 feat(S5): sync_emails enqueues enrich_context_from_emails after commit
 …
-5d51aeb feat(discovery): pydantic schemas for client discovery from Gmail
-4250a6a spec(client-discovery): scan Gmail to populate clients
-10ac069 plan(client-discovery): 13-task TDD plan
+1df9af9 feat(S5): add Proposal.context_brief column
+feb2c1f fix(connector): sync_emails returns 400 not 401 for stale Gmail creds   (2026-05-21)
+b0c7972 plan(S5)  /  90f75cb spec(S5)
 ```
 
 ### Test counts
 
-- Backend: **323 passing** (was 295 — +28 discovery tests)
-- Frontend: **247 passing across 45 files** (was 223 — +24 discovery tests)
-- `pnpm build` clean; new files lint-clean (5 pre-existing `react-hooks/set-state-in-effect` errors in S2/S3 OAuth-callback + context-brief-toggle files remain — pre-date this work, not in scope)
+- Backend: **339 passing** (was 325 — +14 S5 tests)
+- Frontend: 247 passing (unchanged — S5 is backend-only)
+- Migration head: `03_proposal_context_brief`
 
-### Architecture: client discovery at a glance
+### Architecture: S5 at a glance
 
 ```
-Backend
-  POST /api/v1/connectors/gmail/discover-clients
-    → ConnectorViewModel.discover_clients
-        → GmailClient.fetch_recent_messages   (after:<date>, no domain filter, paged)
-        → discovery_aggregator.aggregate()    PURE — freemail/SaaS-noise/own-domain/
-                                              no-reply/already-linked filters, ranked,
-                                              capped at 30 candidates
-  backend/app/services/connectors/discovery_aggregator.py   ← also now owns FREEMAIL_DOMAINS
-                                                              (moved here from connector_viewmodel
-                                                               to break a circular import)
+Three pieces —
 
-Frontend
-  /clients page (empty-state CTA + secondary button when Gmail connected)
-    └─ <ClientDiscoveryFlow>                  state machine: lookback → scanning →
-        ├─ <LookbackPicker>                   list → wizard → done | error
-        ├─ <CandidateList>                    checkbox bulk-select
-        └─ <CandidateReviewWizard>            sequential pre-filled <ClientForm>
-  ClientForm gained an inline contacts editor + initialContacts/submitLabel/cancelLabel props
+A. Context-brief wiring
+   New Proposal.context_brief TEXT column (migration 03).
+   context_service.get_or_create_proposal_brief(session, proposal):
+     returns proposal.context_brief if set; else generates via ContextService,
+     persists to the column, commits. First phase pays one LLM call; rest read free.
+   PipelineService._load_context_brief delegates to it.
+   Wired into: analyze_brief, run_research (pre-existing), run_benchmarks,
+     generate_narrative (covering letter), run_ideation.
+
+B. Cost-model preferences
+   build_cost_model now calls _merge_preferences_into_config(template_config,
+     proposal.preferences) and passes the merged config to CostModelBuilder.
+   discount_tags -> cost_model.default_multipliers (CostModelBuilder already
+     consumes that). pricing_model is carried but NOT branched on (descope).
+
+C. Post-sync email auto-enrichment
+   New ARQ task: app/workers/enrichment.py :: enrich_context_from_emails
+     (registered in WorkerSettings.functions).
+   sync_emails, after committing email rows, collects clients that got new
+     email and enqueues the job. The job feeds EmailIndex rows into
+     ContextService.enrich_context_with_emails, writes the merged profile
+     back, stamps _sources["email"] (mirrors Drive/Calendar/Slack).
+   Terminal job — per-client errors isolated, never fails the sync.
 ```
 
-### Lessons that ate cycles this session (worth not repeating)
+### Lessons from this session
 
-1. **NEVER use `git add -A` in a worktree-based subagent prompt.** A Task-13 subagent ran `git add -A`, which swept up the worktree's `backend/.venv` symlink (created during worktree setup to share the main checkout's venv). The symlink got committed; the `--no-ff` merge then checked it out into the main checkout, **clobbering the real venv directory with a self-referential symlink** (`backend/.venv -> backend/.venv`). Recovery: `git rm --cached backend/.venv`, delete the broken symlink, `uv sync` to rebuild the venv, harden `.gitignore`. **Fix going forward: subagent commit steps must `git add <explicit paths>`, never `-A`.** The plan's per-task commit steps already list explicit paths — the lint-fix follow-up task was the one that improvised `-A`.
+- The `backend/.venv` symlink that broke the *client-discovery* merge **did NOT recur** — the `.gitignore` hardening (dropped trailing slash: `.venv`, `node_modules`) correctly ignores symlinks now. Pre-merge verification (`git ls-files | grep .venv` → empty) confirmed it before merging.
+- Subagent commit steps used explicit `git add <paths>` throughout — no `git add -A`. See `~/.claude/projects/.../memory/feedback_subagent_git_add.md`.
+- Spec-vs-reality drift on `pricing_model`: the first exploration suggested `CostModelBuilder` had a pricing fork to select; the deeper read showed none. The plan header amended the spec's acceptance criterion rather than inventing pricing math. When a plan finds the spec over-promised, amend the plan and flag it — don't silently build the spec's literal words.
 
-2. **`.gitignore` patterns with a trailing slash (`.venv/`, `node_modules/`) match directories ONLY, not symlinks.** That's why the `.venv` symlink slipped past the ignore. Fixed by dropping the trailing slashes (`.venv`, `node_modules`) so symlinks named the same are also ignored. If you ever symlink deps into a worktree again, the gitignore now covers it.
+### Gotchas worth keeping
 
-3. **The global axios 401 interceptor (`frontend/src/api/client.ts`) redirects to `/login` on ANY 401.** A connector endpoint returning 401 for "stale Gmail credentials, please reconnect" would log the user out instead of showing the error. `discover_clients` was changed to return **400** for the decrypt/refresh-failure cases (session is fine, only the Gmail credential is stale — 400 is also semantically correct). `sync_emails` still has the latent 401 bug — noted as a follow-up above.
-
-4. **`worktree.baseRef: head`** is set in `.claude/settings.local.json` (added 2026-05-18). EnterWorktree now branches from local HEAD, so worktrees correctly include unpushed spec/plan commits. No more `git merge main --ff-only` dance after worktree creation.
-
-(Earlier lessons still apply: stateful test `Wrapper` for controlled inputs; `vi.spyOn(window,'confirm')` for jsdom; `getByDisplayValue` not `getByText` for input values.)
-
-### Gmail sync needs clients first (product gotcha — not a bug)
-
-`connector_viewmodel.sync_emails` builds its Gmail search query FROM existing client contact domains (`_extract_domains`). An agency with **0 clients** gets `{"new_emails": 0, ...}` in 0 seconds — the Gmail API is never even called. The frontend renders this as a green "Synced 0 new emails" success, which looks like an empty inbox but actually means "no clients to search for." The discovery feature shipped this session is the intended fix — populate clients first, then sync finds their email.
+- **Gmail sync needs clients first.** `sync_emails` builds its Gmail query from existing client contact domains. An agency with 0 clients gets "0 emails" in 0 seconds — the Gmail API is never called. The client-discovery feature is the intended fix: populate clients, then sync finds their email.
+- **Global 401 interceptor.** `frontend/src/api/client.ts` redirects to `/login` on ANY 401. Connector endpoints return **400** (not 401) for stale-Gmail-credential errors so they surface in-app instead of logging the user out. Both `discover_clients` and `sync_emails` already do this.
+- **Pipeline phases are separate ARQ jobs** with separate DB sessions — anything shared between phases must be persisted (that's why `context_brief` is a column, not passed in memory).
 
 ---
 
-## Quick verification (run this first on resume)
+## Quick verification (run first on resume)
 
 ```bash
-# 1. Repo state
 cd /Users/karthikramesh/Developer/nuprop
-git log --oneline -3                       # HEAD = 4b62a82
-git status                                 # clean, in sync with origin/main
+git log --oneline -3            # HEAD = f073dfe
+git status                      # clean, in sync with origin/main
+git worktree list               # should be only the main checkout
 
-# 2. Local test suites
-cd backend && .venv/bin/python -m pytest -q   # → 323 passed
-cd ../frontend && pnpm test                    # → 247 passed across 45 files
+cd backend && .venv/bin/python -m pytest -q     # → 339 passed
+cd ../frontend && pnpm test                      # → 247 passed across 45 files
 
-# 3. Production health
-curl -s https://nuprop.fly.dev/api/v1/health   # → {"status":"ok","service":"nuprop"}
-
-# 4. Fly machines
-fly machines list -a nuprop                    # 3 expected
+curl -s https://nuprop.fly.dev/api/v1/health     # → {"status":"ok","service":"nuprop"}
+fly machines list -a nuprop                       # 3 machines
 ```
 
-If `backend/.venv/bin/python` is missing (e.g. fresh clone), rebuild it: `cd backend && uv sync`.
+If `backend/.venv/bin/python` is missing (fresh clone): `cd backend && uv sync`.
 
 ---
 
@@ -206,15 +176,16 @@ If `backend/.venv/bin/python` is missing (e.g. fresh clone), rebuild it: `cd bac
 | Thing | Path |
 |---|---|
 | **This file** | `docs/superpowers/HANDOFF.md` |
-| Client-discovery spec | `docs/superpowers/specs/2026-05-19-client-discovery-from-gmail-design.md` |
-| Client-discovery plan | `docs/superpowers/plans/2026-05-19-client-discovery-from-gmail.md` |
-| Rate-card wizard spec/plan | `docs/superpowers/specs/2026-05-18-rate-card-form-design.md`, `plans/2026-05-18-rate-card-wizard.md` |
+| S5 spec / plan | `docs/superpowers/specs/2026-05-21-s5-pipeline-integration-design.md`, `plans/2026-05-21-s5-pipeline-integration.md` |
+| Client-discovery spec / plan | `docs/superpowers/specs/2026-05-19-*`, `plans/2026-05-19-*` |
+| Rate-card wizard spec / plan | `docs/superpowers/specs/2026-05-18-*`, `plans/2026-05-18-*` |
+| Prior specs/plans | `docs/superpowers/{specs,plans}/` |
 | Project memory (auto-loaded) | `~/.claude/projects/-Users-karthikramesh-Developer-nuprop/memory/` |
+| Pipeline phases | `backend/app/services/pipeline_service.py`, `backend/app/workers/pipeline.py` |
+| **S5 new code** | `backend/app/workers/enrichment.py`, `get_or_create_proposal_brief` in `backend/app/services/context_service.py` |
 | Backend tests | `backend/tests/{unit,integration}/` |
-| Frontend tests | `frontend/src/**/__tests__/` |
 | Fly config | `fly.toml` (secrets via `fly secrets list -a nuprop`) |
 | Auto-deploy workflow | `.github/workflows/deploy.yml` |
-| **Client-discovery components (NEW)** | `frontend/src/components/clients/discovery/`, `backend/app/services/connectors/discovery_aggregator.py` |
 
 ---
 
@@ -223,9 +194,8 @@ If `backend/.venv/bin/python` is missing (e.g. fresh clone), rebuild it: `cd bac
 1. Read this file end-to-end (~3 min).
 2. Run the "Quick verification" block above.
 3. Pick from "START HERE":
-   - **Smoke tests** (P6 + client discovery + rate-card wizard, ~20 min in browser) → all three are shipped-but-untested.
+   - **Smoke tests** (rate-card wizard + P6 OAuth + client discovery, ~20 min in browser) — three shipped features, none verified.
    - **Rotate secrets** (~10 min in OAuth consoles).
-   - **Worktree cleanup** (~1 min).
-   - **S5 brainstorm** (start of a ~1.5d backend slice).
+   - **S6 backend polish** — the last roadmap slice (deferrable; fresh brainstorm → spec → plan cycle).
 
-Recommended order: smoke → rotation → cleanup → S5.
+Recommended order: smoke tests → secret rotation → decide on S6.
