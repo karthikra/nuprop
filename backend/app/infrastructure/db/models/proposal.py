@@ -33,6 +33,7 @@ class Proposal(BaseModel):
     preferences: Mapped[dict] = mapped_column(JSONColumn, default=dict)
     research: Mapped[str | None] = mapped_column(Text)
     benchmarks: Mapped[str | None] = mapped_column(Text)
+    context_brief: Mapped[str | None] = mapped_column(Text)
     cost_model: Mapped[dict] = mapped_column(JSONColumn, default=dict)
     covering_letter: Mapped[str | None] = mapped_column(Text)
     covering_letter_alt: Mapped[str | None] = mapped_column(Text)
