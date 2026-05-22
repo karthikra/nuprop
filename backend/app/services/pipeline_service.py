@@ -75,21 +75,8 @@ class PipelineService:
         return None
 
     async def _load_context_brief(self, proposal) -> str | None:
-        try:
-            from app.infrastructure.db.models.client import Client
-            from app.services.context_service import ContextService
-            result = await self.session.execute(
-                select(Client).where(Client.id == str(proposal.client_id))
-            )
-            client_row = result.scalar_one_or_none()
-            if client_row and client_row.context_profile:
-                client_name = proposal.brief.get("client", {}).get("name", "the client")
-                return await ContextService().generate_context_brief(
-                    client_name, client_row.context_profile
-                )
-        except Exception:  # noqa: BLE001 — context is best-effort
-            logger.exception("context brief load failed")
-        return None
+        from app.services.context_service import get_or_create_proposal_brief
+        return await get_or_create_proposal_brief(self.session, proposal)
 
     async def analyze_brief(self, proposal_id: UUID | str) -> None:
         """Brief-intake phase. Extracted from ChatViewModel._handle_brief_phase."""
