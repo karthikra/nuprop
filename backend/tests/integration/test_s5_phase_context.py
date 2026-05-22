@@ -89,3 +89,37 @@ async def test_run_benchmarks_injects_context_into_user_message(
 
 async def _async_noop(*a, **kw):
     return None
+
+
+@pytest.mark.asyncio
+async def test_generate_narrative_passes_context_brief(make_proposal_db, db, monkeypatch):
+    """generate_narrative threads context_brief into NarrativeGenerator.generate_all."""
+    agency, client, proposal = await make_proposal_db(brief={"client": {"name": "Acme"}})
+    from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+    await ProposalRepository(db).update(
+        proposal.id, context_brief="ACME CONTEXT BRIEF", cost_model={"line_items": []},
+    )
+    await db.commit()
+
+    captured = {}
+
+    async def fake_generate_all(self, **kwargs):
+        captured.update(kwargs)
+        from app.services.ai.narrative_generator import NarrativeResult
+        return NarrativeResult(
+            covering_letter="", covering_letter_alt="",
+            letter_strategy_primary="confident", letter_strategy_alt="warm",
+            executive_summary="",
+            scope_sections=[], cost_rationale="", terms="",
+        )
+
+    monkeypatch.setattr(
+        "app.services.ai.narrative_generator.NarrativeGenerator.generate_all", fake_generate_all
+    )
+
+    from app.services.pipeline_service import PipelineService
+    from unittest.mock import AsyncMock
+    svc = PipelineService(db, AsyncMock())
+    await svc.generate_narrative(proposal.id)
+
+    assert captured.get("context_brief") == "ACME CONTEXT BRIEF"

@@ -421,6 +421,8 @@ class PipelineService:
             template_config, proposal.preferences or {}
         )
 
+        context_brief = await self._load_context_brief(proposal)
+
         await self._emit_progress(
             proposal_id, "narrative", "searching", "Writing covering letter (2 variants)..."
         )
@@ -439,6 +441,7 @@ class PipelineService:
             rate_card_offerings=rate_card.offerings if rate_card else None,
             standard_options=rate_card.standard_options if rate_card else 3,
             standard_revisions=rate_card.standard_revisions if rate_card else 2,
+            context_brief=context_brief,
         )
 
         await self.proposal_repo.update(
