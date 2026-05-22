@@ -24,8 +24,8 @@ This is intentionally a tight, ~1-day resilience slice — no new features, no b
 
 - **Connector HTTP clients** — `gmail_client.py`, `gdrive_client.py`, `gcal_client.py`, `slack_client.py` — each call opens its own `async with httpx.AsyncClient()`, issues the request, and calls `raise_for_status()`. There is **no retry** anywhere (`grep tenacity` → 0 hits). Timeouts are inconsistent: `slack_client` passes `timeout=10`/`15` on some calls; the Gmail and Drive/Calendar calls pass none, so a hung connection has no bound.
 - **Gmail pagination** — `gmail_client.py:165` (`fetch_messages_for_domain`) and `:209` (`fetch_recent_messages`) both loop `while len(all_messages) < limit`. S1 added `if not page_token: break`, so the common termination case is handled. Residual risk: if Google returns 0 messages but a non-null `pageToken` repeatedly, `len < limit` never trips and the loop runs unbounded.
-- **Email parsing** — `connector_viewmodel.py:259` and `:495` call `email.split("@")[-1]` with no `@` check (line 452 *does* guard, so the codebase is inconsistent). Malformed email `Date` headers fall back to `datetime.now()`, silently losing the original timestamp and corrupting time-based sorting.
-- **LLM calls** — `context_service.py` reaches Bedrock via `self._llm = AnthropicClient()` (`complete`, `complete_json`). No explicit timeout — a hung call stalls the whole pipeline phase (each phase is its own ARQ job).
+- **Email parsing** — re-checking the code: `connector_viewmodel.py:258-259` is *already* guarded (`if _email and "@" in _email`). Only `_extract_domains` at `:495` (`email.split("@")[-1]`) is unguarded. Separately, `gmail_client.py:142` falls back to a naive `datetime.now()` when an email `Date` header is unparseable — disguising the parse failure as a plausible timestamp, and producing a timezone-naive value that flows into the `DateTime(timezone=True)` `EmailIndex.date` column.
+- **LLM calls** — `context_service.py` reaches Bedrock via `AnthropicClient()`, which is a thin facade over `AIService` (`app/services/llm.py`). `AIService.__init__` constructs `AsyncAnthropicBedrock(**kwargs)` with no `timeout` — a hung call stalls the whole pipeline phase (each phase is its own ARQ job).
 - **`client_repo.search`** — default `limit=50` (`client_repo.py:23`). Agencies with >50 clients silently lose the tail; the frontend client list does not paginate.
 
 ## Architecture
@@ -64,9 +64,9 @@ Internally the module may use `tenacity` for the backoff curve; the design point
 | Fix | Location | Change |
 |---|---|---|
 | Pagination max-iterations guard | `gmail_client.py:165`, `:209` | Add a hard iteration cap to both `while` loops — a fixed `MAX_PAGE_ITERATIONS = 50` (comfortably above any real `limit / batch_size`). If hit, log a structured warning and `break` — bounds the 0-results-plus-non-null-`pageToken` case. |
-| Email `@` validation | `connector_viewmodel.py:259`, `:495` | Guard `email.split("@")[-1]` — skip and log entries without exactly one valid `@`, matching the existing guard pattern at line 452. |
-| Email date parsing | `connector_viewmodel.py` (email row construction) | When the email `Date` header is unparseable, store `None` rather than silently defaulting to `datetime.now()`. |
-| LLM call timeout | `AnthropicClient` (used via `context_service._llm`) | Add an explicit timeout to the `complete` / `complete_json` calls so a hung Bedrock call cannot stall a pipeline phase. |
+| Email `@` validation | `connector_viewmodel.py:495` (`_extract_domains`) | Guard `email.split("@")[-1]` — skip entries without a valid `@`. Line 259 is already guarded; only `_extract_domains` needs the fix. |
+| Email date parsing | `gmail_client.py:142` (`get_message`) | On an unparseable `Date` header, return `date=None` instead of a naive `datetime.now()`. `EmailIndex.date` is `NOT NULL`, so the persisted value still gets a fallback — but at the *one* existing coercion point (`connector_viewmodel.py:324`, `… else now` where `now` is timezone-aware). Net effect: the failure stops being disguised as a plausible per-message timestamp, the naive-datetime bug is removed, and the `connector.gmail.bad_date` log is the audit trail. No schema change. |
+| LLM call timeout | `app/services/llm.py` — `AIService.__init__` | Pass an explicit `timeout` to `AsyncAnthropicBedrock(**kwargs)` so a hung Bedrock call cannot stall a pipeline phase. (`AnthropicClient` is only a facade — the real client lives here.) |
 | `client_repo` cap | `client_repo.py:23` | Raise the default `limit` from 50 to 500. One-line change, no API-shape change. |
 
 ## Error handling
