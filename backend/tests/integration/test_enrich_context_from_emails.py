@@ -81,3 +81,64 @@ async def test_enrich_isolates_per_client_errors(make_proposal_db, db, monkeypat
     from app.workers.enrichment import _enrich_clients
     # Must NOT raise — per-client errors are caught.
     await _enrich_clients(db, str(agency.id), [str(client.id)])
+
+
+@pytest.mark.asyncio
+async def test_enrich_stamps_sources_email(make_proposal_db, db, monkeypatch):
+    """_enrich_clients must stamp _sources['email'] on the context profile after enrichment.
+
+    The stamp must mirror the shape Drive/Calendar/Slack use:
+    {"email_count": <int>, "last_sync": <ISO timestamp str>}.
+    fake_enrich returns a plain dict (no _sources); the stamp is applied by
+    _enrich_clients itself, not by enrich_context_with_emails.
+    """
+    agency, client, proposal = await make_proposal_db(brief={"client": {"name": "Acme"}})
+
+    from app.infrastructure.db.models.email_index import EmailIndex
+    row = EmailIndex(
+        agency_id=str(agency.id),
+        gmail_message_id=f"m-{uuid.uuid4()}",
+        gmail_thread_id="t-sources",
+        client_domain="acme.com",
+        client_name=client.name,
+        message_type="update",
+        sentiment="neutral",
+        priority="low",
+        summary="Sources stamp test",
+        entities={},
+        from_address="ops@acme.com",
+        to_addresses=[],
+        subject="Weekly update",
+        date=datetime(2026, 5, 10, tzinfo=timezone.utc),
+        has_attachments=False,
+        synced_at=datetime.now(timezone.utc),
+    )
+    db.add(row)
+    await db.commit()
+
+    async def fake_enrich(self, context_profile, email_summaries):
+        # Return merged profile WITHOUT _sources — stamp must be added by _enrich_clients
+        return {**(context_profile or {}), "enriched": True}
+
+    monkeypatch.setattr(
+        "app.services.context_service.ContextService.enrich_context_with_emails", fake_enrich
+    )
+
+    from app.workers.enrichment import _enrich_clients
+    await _enrich_clients(db, str(agency.id), [str(client.id)])
+
+    from app.infrastructure.db.repositories.client_repo import ClientRepository
+    refreshed = await ClientRepository(db).get_by_id(client.id)
+    profile = refreshed.context_profile
+
+    # _sources["email"] must exist
+    assert "_sources" in profile, "context_profile must have _sources key"
+    assert "email" in profile["_sources"], "_sources must have 'email' key"
+
+    email_source = profile["_sources"]["email"]
+    # Must carry email_count (matching Drive's document_count / Slack's mention_count pattern)
+    assert "email_count" in email_source, "_sources['email'] must carry 'email_count'"
+    assert email_source["email_count"] == 1, "email_count should equal number of EmailIndex rows"
+    # Must carry last_sync ISO timestamp (all other sources carry this)
+    assert "last_sync" in email_source, "_sources['email'] must carry 'last_sync'"
+    assert isinstance(email_source["last_sync"], str), "last_sync must be an ISO string"

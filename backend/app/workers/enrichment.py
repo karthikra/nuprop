@@ -8,6 +8,7 @@ isolated so one bad client does not abort the rest.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
@@ -54,6 +55,10 @@ async def _enrich_clients(session, agency_id: str, client_ids: list[str]) -> Non
             merged = await context_service.enrich_context_with_emails(
                 client.context_profile or {}, email_summaries
             )
+            merged.setdefault("_sources", {})["email"] = {
+                "email_count": len(rows),
+                "last_sync": datetime.now(timezone.utc).isoformat(),
+            }
             await client_repo.update(client.id, context_profile=merged)
             await session.commit()
             logger.info(
