@@ -345,6 +345,9 @@ class PipelineService:
         if proposal is None:
             return
         template_config = await self._load_template_config(proposal)
+        effective_config = self._merge_preferences_into_config(
+            template_config, proposal.preferences or {}
+        )
 
         await self._emit_progress(proposal_id, "cost_model", "searching", "Building cost model from rate card...")
         model = await CostModelBuilder().build(
@@ -352,7 +355,7 @@ class PipelineService:
             db=self.session,
             agency_id=str(proposal.agency_id),
             benchmarks_md=proposal.benchmarks,
-            template_config=template_config,
+            template_config=effective_config,
         )
         cost_dict = CostModelBuilder.model_to_dict(model)
         await self.proposal_repo.update(proposal.id, cost_model=cost_dict)
