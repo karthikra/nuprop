@@ -74,7 +74,7 @@ def _inr(amount: int) -> str:
     return sign + ",".join(reversed(groups)) + "," + last3
 
 
-def _build_ideation_system_prompt(proposal) -> str:
+def _build_ideation_system_prompt(proposal, context_brief: str | None = None) -> str:
     """Assemble the system prompt for one ideation turn.
 
     Gracefully handles a brand-new proposal where ``brief`` is empty and
@@ -116,6 +116,9 @@ def _build_ideation_system_prompt(proposal) -> str:
             f"\n**Executive summary:**\n{_truncate(proposal.executive_summary, _SUMMARY_CHARS)}"
         )
 
+    if context_brief:
+        parts.append(f"\n## Client context (from past interactions)\n{context_brief}")
+
     return "\n".join(parts)
 
 
@@ -150,7 +153,9 @@ class IdeationService:
             if m.role in (MessageRole.USER.value, MessageRole.ASSISTANT.value)
         ]
 
-        system_text = _build_ideation_system_prompt(proposal)
+        from app.services.context_service import get_or_create_proposal_brief
+        context_brief = await get_or_create_proposal_brief(self.session, proposal)
+        system_text = _build_ideation_system_prompt(proposal, context_brief)
         response = await self.ai.messages_create(
             model=self.ai.model_for(Tier.BALANCED),
             max_tokens=2048,

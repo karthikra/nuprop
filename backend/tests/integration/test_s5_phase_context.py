@@ -92,6 +92,48 @@ async def _async_noop(*a, **kw):
 
 
 @pytest.mark.asyncio
+async def test_run_ideation_includes_context_brief_in_system_prompt(
+    make_proposal_db, db, monkeypatch,
+):
+    """run_ideation puts the context brief into the ideation system prompt."""
+    agency, client, proposal = await make_proposal_db(brief={"client": {"name": "Acme"}})
+    from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+    await ProposalRepository(db).update(proposal.id, context_brief="ACME CONTEXT BRIEF")
+    await db.commit()
+
+    # Seed one user message on the ideation channel so run_ideation has input.
+    from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
+    from app.infrastructure.db.models.chat_message import MessageRole, MessageType
+    await ChatMessageRepository(db).create(
+        proposal_id=proposal.id, role=MessageRole.USER.value,
+        message_type=MessageType.TEXT.value, content="What's the angle?",
+        phase="ideation", channel="ideation",
+    )
+    await db.commit()
+
+    captured = {}
+
+    async def fake_messages_create(self, **kwargs):
+        captured["system"] = kwargs.get("system")
+        class _Resp:
+            content = [type("B", (), {"text": "an idea"})()]
+        return _Resp()
+
+    monkeypatch.setattr(
+        "app.services.llm.AIService.messages_create", fake_messages_create
+    )
+
+    from app.services.ideation_service import IdeationService
+    from unittest.mock import AsyncMock
+    svc = IdeationService(db, AsyncMock())
+    await svc.run_ideation(proposal.id)
+
+    system = captured["system"]
+    text = " ".join(block["text"] for block in system) if isinstance(system, list) else str(system)
+    assert "ACME CONTEXT BRIEF" in text
+
+
+@pytest.mark.asyncio
 async def test_generate_narrative_passes_context_brief(make_proposal_db, db, monkeypatch):
     """generate_narrative threads context_brief into NarrativeGenerator.generate_all."""
     agency, client, proposal = await make_proposal_db(brief={"client": {"name": "Acme"}})
