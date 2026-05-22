@@ -151,11 +151,15 @@ async def run_ideation(ctx: dict, proposal_id: str) -> None:
     await _run_ideation_phase(ctx, proposal_id)
 
 
+from app.workers.enrichment import enrich_context_from_emails  # noqa: E402
+
+
 class WorkerSettings:
     functions = [
         analyze_brief, run_research, run_benchmarks,
         build_cost_model, generate_narrative, generate_outputs,
-        run_ideation,                                  # NEW
+        run_ideation,
+        enrich_context_from_emails,
     ]
     redis_settings = get_redis_settings()
     max_tries = ARQ_MAX_TRIES
