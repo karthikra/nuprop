@@ -250,6 +250,15 @@ class ConnectorViewModel(ViewModelBase):
         total_new = 0
         synced_domains: list[str] = []
 
+        # domain -> client.id, for enqueueing context enrichment after the sync.
+        domain_to_client_id: dict[str, str] = {}
+        for _c in clients:
+            for _contact in (_c.contacts or []):
+                _email = (_contact or {}).get("email") if isinstance(_contact, dict) else None
+                if _email and "@" in _email:
+                    domain_to_client_id[_email.split("@")[-1].lower()] = str(_c.id)
+        clients_with_new_email: set[str] = set()
+
         for domain, client_name in domain_map.items():
             # Per-domain `since` from the watermark (falls back to None)
             since: datetime | None = None
@@ -320,6 +329,11 @@ class ConnectorViewModel(ViewModelBase):
                 # Persist this domain's emails in chunks, committing as we go
                 await self.email_repo.upsert_many(rows, chunk_size=50)
 
+                # Track which clients received new email for post-sync enrichment.
+                _cid = domain_to_client_id.get(domain)
+                if _cid:
+                    clients_with_new_email.add(_cid)
+
                 # Advance per-domain watermark to the newest persisted email's date
                 newest_iso = max(
                     (m["date"] for m in new_messages if isinstance(m.get("date"), datetime)),
@@ -350,6 +364,21 @@ class ConnectorViewModel(ViewModelBase):
         settings["gmail"] = gmail_settings
         await self.agency_repo.update(agency_id, settings=settings)
         await self._db.commit()
+
+        if clients_with_new_email:
+            try:
+                pool = self._request.app.state.arq_pool
+                await pool.enqueue_job(
+                    "enrich_context_from_emails",
+                    str(agency_id),
+                    sorted(clients_with_new_email),
+                    _job_id=f"{agency_id}:enrich_context:{int(time.time())}",
+                )
+            except Exception:  # noqa: BLE001 — enqueue failure must not fail the sync
+                logger.exception(
+                    "failed to enqueue enrich_context_from_emails",
+                    extra={"event": "connector.enrich.enqueue_failed"},
+                )
 
         duration = round(time.time() - start, 1)
         return {
