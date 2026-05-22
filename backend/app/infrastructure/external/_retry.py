@@ -20,6 +20,7 @@ DEFAULT_TIMEOUT = 30.0
 DEFAULT_MAX_ATTEMPTS = 4
 _BACKOFF_BASE = 0.5
 _BACKOFF_JITTER = 0.5
+_MAX_RETRY_AFTER = 60.0  # never sleep longer than this from a Retry-After header
 
 # Indirection so tests can stub out the actual waiting without touching the
 # global asyncio.sleep.
@@ -32,11 +33,11 @@ def _backoff(attempt: int) -> float:
 
 
 def _retry_delay(response: httpx.Response, attempt: int) -> float:
-    """Honor a numeric ``Retry-After`` header; otherwise exponential backoff."""
+    """Honor a numeric ``Retry-After`` header (capped); otherwise exponential backoff."""
     retry_after = response.headers.get("Retry-After")
     if retry_after:
         try:
-            return float(int(retry_after))
+            return min(float(int(retry_after)), _MAX_RETRY_AFTER)
         except ValueError:
             pass
     return _backoff(attempt)
@@ -118,5 +119,6 @@ async def request_with_retry(
         "connector http request exhausted retries",
         extra={"event": "connector.retry.exhausted", "url": url, "attempts": max_attempts},
     )
-    assert last_transport_exc is not None
+    if last_transport_exc is None:
+        raise RuntimeError("retry loop exhausted with no transport exception")
     raise last_transport_exc

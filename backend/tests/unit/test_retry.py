@@ -91,3 +91,14 @@ async def test_honors_retry_after_header(monkeypatch):
     )
     assert resp.status_code == 200
     assert seen == [7.0]
+
+
+@pytest.mark.asyncio
+async def test_raises_last_transport_error_after_exhausting_attempts():
+    handler, calls = _counting_handler([httpx.ConnectError("boom")])
+    with pytest.raises(httpx.ConnectError, match="boom"):
+        await request_with_retry(
+            "GET", "https://x.test/y",
+            transport=httpx.MockTransport(handler), max_attempts=3,
+        )
+    assert calls["n"] == 3
