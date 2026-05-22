@@ -72,8 +72,9 @@ class GmailClient:
 
     async def revoke_token(self, token: str) -> None:
         try:
+            # max_attempts=1: revoke is best-effort fire-and-forget; retrying adds latency for no gain
             await request_with_retry(
-                "POST", self.OAUTH_REVOKE_URL, params={"token": token}
+                "POST", self.OAUTH_REVOKE_URL, params={"token": token}, max_attempts=1
             )
         except httpx.HTTPError as exc:
             logger.warning(
