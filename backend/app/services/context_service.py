@@ -245,9 +245,6 @@ async def get_or_create_proposal_brief(session, proposal) -> str | None:
     callers (and retries) read the persisted column. Best-effort: any failure
     returns None and the caller proceeds without context.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     if proposal.context_brief is not None:
         return proposal.context_brief
 
