@@ -16,6 +16,7 @@ from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.infrastructure.queue.events import publish
 from app.infrastructure.queue.redis import get_redis_settings
 from app.services.pipeline_service import PipelineService
+from app.workers.enrichment import enrich_context_from_emails
 
 logger = logging.getLogger(__name__)
 
@@ -149,9 +150,6 @@ async def run_ideation(ctx: dict, proposal_id: str) -> None:
     # Actual logic lives in `_run_ideation_phase` so the try/except boundary is
     # visually parallel to `_run_phase` for the main pipeline tasks.
     await _run_ideation_phase(ctx, proposal_id)
-
-
-from app.workers.enrichment import enrich_context_from_emails  # noqa: E402
 
 
 class WorkerSettings:
