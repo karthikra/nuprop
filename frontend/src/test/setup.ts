@@ -31,6 +31,10 @@ import { server } from './mocks/server'
 // Capture the real (unfaked) setTimeout BEFORE any test installs fake timers.
 const realSetTimeout = globalThis.setTimeout.bind(globalThis)
 
+// TODO: remove this asyncWrapper override once @testing-library/dom >= 11
+// ships vitest-aware fake-timer detection (today it only checks `typeof jest`).
+// The vi.advanceTimersByTime act-wrapper below stays — it addresses React 19
+// concurrent-mode flushing, which is independent of the @testing-library issue.
 configure({
   asyncWrapper: async (cb) => {
     // Mirror the IS_REACT_ACT_ENVIRONMENT toggle from the default wrapper so
@@ -59,12 +63,13 @@ configure({
 // in the React scheduler but doesn't flush before the next synchronous
 // assertion runs.
 const _origAdvance = vi.advanceTimersByTime.bind(vi)
-vi.advanceTimersByTime = (ms: number) => {
+vi.advanceTimersByTime = (ms: number): ReturnType<typeof _origAdvance> => {
   if (vi.isFakeTimers()) {
-    act(() => { _origAdvance(ms) })
-  } else {
-    _origAdvance(ms)
+    let returned: ReturnType<typeof _origAdvance> | undefined
+    act(() => { returned = _origAdvance(ms) })
+    return returned as ReturnType<typeof _origAdvance>
   }
+  return _origAdvance(ms)
 }
 
 // ── MSW lifecycle ────────────────────────────────────────────────────────────
