@@ -35,24 +35,31 @@ _EXTRACT_SYSTEM = (
 
 
 def parse_workbook(content: bytes) -> list[dict]:
-    """Read the workbook into a list of sheets, each with rows of cells."""
+    """Read the workbook into a list of sheets, each with rows of cells. Skips all-empty rows."""
     wb = load_workbook(filename=BytesIO(content), data_only=True, read_only=True)
     sheets = []
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         rows = []
         for row in ws.iter_rows(values_only=True):
-            cells = [{"value": v} for v in row]
-            rows.append({"cells": cells})
+            if not any(v is not None for v in row):
+                continue
+            rows.append({"cells": [{"value": v} for v in row]})
         sheets.append({"name": sheet_name, "rows": rows})
     return sheets
 
 
 async def extract_with_llm(sheets: list[dict]) -> dict:
     """Send the parsed sheets to Claude and ask for a structured rate card."""
+    full = json.dumps(sheets, ensure_ascii=False, indent=2, default=str)
+    if len(full) > 50_000:
+        logger.warning(
+            "rate-card spreadsheet JSON exceeds 50k chars; truncating for LLM",
+            extra={"event": "rate_card_excel.truncated", "size": len(full)},
+        )
     user_prompt = (
         "Spreadsheet contents:\n```json\n"
-        + json.dumps(sheets, ensure_ascii=False, indent=2, default=str)[:50_000]
+        + full[:50_000]
         + "\n```\n\nReturn the JSON described in the system prompt."
     )
 

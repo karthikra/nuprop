@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_agency_id
@@ -20,6 +21,12 @@ from app.viewmodels.proposal_viewmodel import ProposalViewModel
 from app.viewmodels.rate_card_viewmodel import RateCardViewModel
 
 router = APIRouter(prefix="/proposals", tags=["proposals"])
+
+
+class RateCardConfirmBody(BaseModel):
+    hourly_rates: dict[str, int | float] = {}
+    offerings: dict[str, dict] = {}
+    multipliers: dict[str, int | float] = {}
 
 
 def get_vm(request: Request, db: AsyncSession = Depends(get_db)) -> ProposalViewModel:
@@ -171,7 +178,6 @@ async def skip_rate_card_gaps(
 async def import_rate_card_xlsx(
     proposal_id: UUID,
     file: UploadFile = File(...),
-    request: Request = None,
     agency_id: UUID = Depends(get_current_agency_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -198,7 +204,7 @@ async def import_rate_card_xlsx(
 @router.post("/{proposal_id}/rate-card-import/confirm", status_code=200)
 async def confirm_rate_card_import(
     proposal_id: UUID,
-    body: dict,
+    body: RateCardConfirmBody,
     request: Request,
     agency_id: UUID = Depends(get_current_agency_id),
     db: AsyncSession = Depends(get_db),
@@ -208,11 +214,7 @@ async def confirm_rate_card_import(
     if not proposal or str(proposal.agency_id) != str(agency_id):
         raise HTTPException(status_code=404, detail="Proposal not found")
 
-    override = {
-        "hourly_rates": body.get("hourly_rates") or {},
-        "offerings": body.get("offerings") or {},
-        "multipliers": body.get("multipliers") or {},
-    }
+    override = body.model_dump()
 
     await proposal_repo.update(
         proposal_id,
