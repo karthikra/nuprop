@@ -20,7 +20,7 @@ class ClientRepository(BaseRepository[Client]):
         industry: str | None = None,
         tag: str | None = None,
         skip: int = 0,
-        limit: int = 50,
+        limit: int = 500,
     ) -> list[Client]:
         stmt = select(Client).where(Client.agency_id == str(agency_id))
 
