@@ -12,6 +12,11 @@ from app.infrastructure.external._retry import request_with_retry
 
 logger = logging.getLogger(__name__)
 
+# Hard cap on Gmail search pagination — comfortably above any real
+# `limit / batch_size`. Bounds the pathological case where Google returns
+# 0 messages but a non-null `nextPageToken`.
+MAX_PAGE_ITERATIONS = 50
+
 
 class GmailClient:
     """Google OAuth 2.0 + Gmail API v1 via raw HTTP (no Google SDK)."""
@@ -158,8 +163,20 @@ class GmailClient:
 
         all_messages = []
         page_token = None
+        iterations = 0
 
         while len(all_messages) < limit:
+            iterations += 1
+            if iterations > MAX_PAGE_ITERATIONS:
+                logger.warning(
+                    "gmail pagination hit max iterations; stopping",
+                    extra={
+                        "event": "connector.gmail.pagination_cap",
+                        "domain": domain,
+                        "collected": len(all_messages),
+                    },
+                )
+                break
             batch_size = min(100, limit - len(all_messages))
             msg_refs, page_token = await self.search_messages(access_token, query, batch_size, page_token)
 
@@ -202,8 +219,20 @@ class GmailClient:
 
         all_messages: list[dict] = []
         page_token: str | None = None
+        iterations = 0
 
         while len(all_messages) < limit:
+            iterations += 1
+            if iterations > MAX_PAGE_ITERATIONS:
+                logger.warning(
+                    "gmail pagination hit max iterations; stopping",
+                    extra={
+                        "event": "connector.gmail.pagination_cap",
+                        "scan": "recent",
+                        "collected": len(all_messages),
+                    },
+                )
+                break
             batch_size = min(100, limit - len(all_messages))
             msg_refs, page_token = await self.search_messages(
                 access_token, query, batch_size, page_token,
