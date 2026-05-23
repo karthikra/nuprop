@@ -492,6 +492,8 @@ class ConnectorViewModel(ViewModelBase):
             for contact in contacts:
                 if isinstance(contact, dict) and contact.get("email"):
                     email = contact["email"]
+                    if "@" not in email:
+                        continue
                     domain = email.split("@")[-1].lower()
                     if domain not in FREEMAIL_DOMAINS:
                         domain_map[domain] = client.name
