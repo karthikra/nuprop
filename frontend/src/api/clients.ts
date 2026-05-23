@@ -124,6 +124,11 @@ export function useResetContext(clientId: string) {
 /** On-demand fetch of the natural-language context brief. Caller passes
  *  `enabled` so the query only runs when the toggle is open. */
 export function useContextBrief(clientId: string, enabled: boolean) {
+  // staleTime + gcTime let close+reopen serve from React Query's own cache
+  // (5-minute window). After useContextSave / useResetContext invalidate this
+  // query key, the next open refetches automatically.
+  // gcTime overrides the test QueryClient's `gcTime: 0` default so the cache
+  // actually survives the observer-gone period between close and reopen.
   return useQuery({
     queryKey: ['client-context-brief', clientId],
     queryFn: async () => {
@@ -133,5 +138,7 @@ export function useContextBrief(clientId: string, enabled: boolean) {
       return data
     },
     enabled: !!clientId && enabled,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 5 * 60 * 1000,
   })
 }
