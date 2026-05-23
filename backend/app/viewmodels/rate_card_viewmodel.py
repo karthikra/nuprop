@@ -56,7 +56,7 @@ class RateCardViewModel(ViewModelBase):
         if rc is None:
             rc = await self.repo.create(
                 agency_id=agency_id,
-                version="auto",
+                version="v1",
                 is_active=True,
                 hourly_rates=hourly_rates,
                 offerings=offerings,
