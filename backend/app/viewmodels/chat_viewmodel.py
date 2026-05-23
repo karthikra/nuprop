@@ -288,6 +288,27 @@ class ChatViewModel(ViewModelBase):
             if template_key:
                 await self.proposal_repo.update(proposal.id, template_id=template_key)
             pipeline["phases_completed"] = pipeline.get("phases_completed", []) + ["template_confirm"]
+
+            # If rate-card gaps were detected during analyze_brief, pause here.
+            # The user must fill / skip / import-Excel before research can start.
+            if proposal.rate_card_gaps:
+                pipeline["current_phase"] = "rate_card_gaps"
+                await self.proposal_repo.update(proposal.id, pipeline_state=pipeline)
+                pause_msg = await self.msg_repo.create(
+                    proposal_id=proposal_id, role=MessageRole.ASSISTANT.value,
+                    message_type=MessageType.TEXT.value,
+                    content=(
+                        "Template confirmed. Before I cost this proposal I need a few "
+                        "rates that aren't in your rate card yet — fill them, drop in a "
+                        "rate-card spreadsheet, or skip to use estimated defaults."
+                    ),
+                    phase="rate_card_gaps",
+                )
+                await self._broadcast_msg(proposal_id, pause_msg)
+                await ws_manager.broadcast(str(proposal_id), {
+                    "type": "phase_change", "phase": "rate_card_gaps",
+                })
+                return pause_msg
         elif gate_id == "cost_model":
             pipeline["phases_completed"] = pipeline.get("phases_completed", []) + ["cost_model_review"]
         elif gate_id == "narrative":

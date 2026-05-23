@@ -36,26 +36,31 @@ async def _agency_with_rate_card(db):
     return agency
 
 
+async def _get_rate_card(db, agency_id):
+    return await RateCardRepository(db).get_active(agency_id)
+
+
 async def test_build_returns_fallback_when_no_rate_card(db):
     agency = await AgencyRepository(db).create(name="No RC", slug="no-rc")
     await db.commit()
     model = await CostModelBuilder().build(
         brief={"project": {"deliverables": [{"category": "Logo", "quantity": 1}]}},
-        db=db,
-        agency_id=str(agency.id),
+        rate_card_row=None,
+        rate_card_override=None,
     )
     assert "rate card" in model.pricing_notes.lower()
+    assert model.source == "fallback"
 
 
 async def test_build_naive_matches_deliverables_to_packages(db):
     agency = await _agency_with_rate_card(db)
+    rate_card_row = await _get_rate_card(db, agency.id)
     builder = CostModelBuilder()
     model = await builder.build(
         brief={"project": {"deliverables": [
             {"category": "logo design", "details": "brand mark", "quantity": 1},
         ]}},
-        db=db,
-        agency_id=str(agency.id),
+        rate_card_row=rate_card_row,
     )
     assert len(model.line_items) == 1
     assert model.line_items[0].unit_cost > 0
@@ -65,43 +70,44 @@ async def test_build_naive_matches_deliverables_to_packages(db):
     assert model.grand_total == model.total + model.gst_amount
     # speculative tiered pricing is always pre-computed
     assert set(model.tiered) == {"essential", "standard", "premium"}
+    assert model.source == "agency"
 
 
 async def test_build_applies_rush_multiplier_from_timeline(db):
     agency = await _agency_with_rate_card(db)
+    rate_card_row = await _get_rate_card(db, agency.id)
     model = await CostModelBuilder().build(
         brief={"project": {
             "deliverables": [{"category": "logo design", "details": "mark", "quantity": 1}],
             "timeline": "rush — needed in 2 weeks",
         }},
-        db=db,
-        agency_id=str(agency.id),
+        rate_card_row=rate_card_row,
     )
     assert "urgency_rush" in model.multipliers_applied
 
 
 async def test_build_applies_existing_client_multiplier(db):
     agency = await _agency_with_rate_card(db)
+    rate_card_row = await _get_rate_card(db, agency.id)
     model = await CostModelBuilder().build(
         brief={
             "project": {"deliverables": [{"category": "logo design", "details": "m", "quantity": 1}]},
             "context": {"relationship": "existing_client"},
         },
-        db=db,
-        agency_id=str(agency.id),
+        rate_card_row=rate_card_row,
     )
     assert "existing_client" in model.multipliers_applied
 
 
 async def test_build_applies_annual_bundle_discount(db):
     agency = await _agency_with_rate_card(db)
+    rate_card_row = await _get_rate_card(db, agency.id)
     model = await CostModelBuilder().build(
         brief={"project": {
             "deliverables": [{"category": "logo design", "details": "m", "quantity": 1}],
             "timeline": "12 month annual retainer",
         }},
-        db=db,
-        agency_id=str(agency.id),
+        rate_card_row=rate_card_row,
     )
     assert model.discount_percent > 0
     assert model.discount_amount > 0

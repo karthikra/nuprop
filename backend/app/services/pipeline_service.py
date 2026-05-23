@@ -21,10 +21,12 @@ from app.infrastructure.db.models.chat_message import MessageRole, MessageType
 from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.infrastructure.queue.events import publish
+from app.infrastructure.db.repositories.rate_card_repo import RateCardRepository
 from app.services.ai.benchmark_agent import BenchmarkAgent
 from app.services.ai.brief_analyzer import BriefAnalyzer
 from app.services.ai.cost_model_builder import CostModelBuilder
 from app.services.ai.narrative_generator import NarrativeGenerator
+from app.services.ai.rate_gap_analyzer import analyze_gaps
 from app.services.ai.research_agent import RESEARCH_SYSTEM, ResearchAgent
 from app.services.llm import Tier, get_ai_service
 from app.services.research_planner import generate_benchmarks_plan, generate_research_plan
@@ -78,6 +80,33 @@ class PipelineService:
         from app.services.context_service import get_or_create_proposal_brief
         return await get_or_create_proposal_brief(self.session, proposal)
 
+    async def _detect_rate_card_gaps(self, proposal, brief: dict) -> None:
+        """Identify hourly roles + offerings the cost-model phase will need that
+        the agency's active rate card does not yet have, and persist them on
+        the proposal. Pipeline pause is enforced later by the template-approval gate."""
+        gaps_input = await analyze_gaps(brief)
+        needed_roles = gaps_input["needed_roles"]
+        needed_offerings = gaps_input["needed_offerings"]
+
+        rc_repo = RateCardRepository(self.session)
+        rate_card = await rc_repo.get_active(proposal.agency_id)
+
+        existing_roles = set((rate_card.hourly_rates or {}).keys()) if rate_card else set()
+        existing_offerings = set((rate_card.offerings or {}).keys()) if rate_card else set()
+
+        missing_roles = [r for r in needed_roles if r not in existing_roles]
+        missing_offerings = [o for o in needed_offerings if o not in existing_offerings]
+
+        if not missing_roles and not missing_offerings:
+            return  # nothing to write — proposal.rate_card_gaps stays NULL
+
+        await self.proposal_repo.update(proposal.id, rate_card_gaps={
+            "missing_roles": missing_roles,
+            "missing_offerings": missing_offerings,
+            "needed_roles": needed_roles,
+            "needed_offerings": needed_offerings,
+        })
+
     async def analyze_brief(self, proposal_id: UUID | str) -> None:
         """Brief-intake phase. Extracted from ChatViewModel._handle_brief_phase."""
         proposal = await self.proposal_repo.get_by_id(proposal_id)
@@ -106,6 +135,7 @@ class PipelineService:
             msg_type = MessageType.BRIEF_SUMMARY.value
             extra_data = {"brief": result.brief_data, "requires_approval": True}
             await self.proposal_repo.update(proposal.id, brief=result.brief_data)
+            await self._detect_rate_card_gaps(proposal, result.brief_data)
 
         assistant_msg = await self.msg_repo.create(
             proposal_id=proposal_id,
@@ -350,12 +380,13 @@ class PipelineService:
         )
 
         await self._emit_progress(proposal_id, "cost_model", "searching", "Building cost model from rate card...")
+        rc_repo = RateCardRepository(self.session)
+        rate_card_row = await rc_repo.get_active(proposal.agency_id)
         model = await CostModelBuilder().build(
-            brief=proposal.brief,
-            db=self.session,
-            agency_id=str(proposal.agency_id),
-            benchmarks_md=proposal.benchmarks,
+            brief=proposal.brief or {},
+            rate_card_row=rate_card_row,
             template_config=effective_config,
+            rate_card_override=proposal.rate_card_override,
         )
         cost_dict = CostModelBuilder.model_to_dict(model)
         await self.proposal_repo.update(proposal.id, cost_model=cost_dict)

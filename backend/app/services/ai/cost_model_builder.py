@@ -4,10 +4,6 @@ import json
 import math
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.infrastructure.db.models.rate_card import RateCard
 from app.infrastructure.external.anthropic_client import AnthropicClient
 
 MAPPING_PROMPT = """You are a cost modelling assistant for a design agency proposal tool.
@@ -69,6 +65,7 @@ class CostModel:
     multipliers_applied: list[str] = field(default_factory=list)
     tiered: dict = field(default_factory=dict)  # {essential: {...}, standard: {...}, premium: {...}}
     pricing_notes: str = ""
+    source: str = "fallback"  # "override" | "agency" | "fallback"
 
 
 class CostModelBuilder:
@@ -78,35 +75,44 @@ class CostModelBuilder:
     async def build(
         self,
         brief: dict,
-        db: AsyncSession,
-        agency_id: str,
-        benchmarks_md: str | None = None,
+        rate_card_row=None,
         template_config: dict | None = None,
+        rate_card_override: dict | None = None,
     ) -> CostModel:
-        """Build a cost model from the brief and rate card."""
-        # Load the active rate card
-        result = await db.execute(
-            select(RateCard)
-            .where(RateCard.agency_id == agency_id, RateCard.is_active == True)
-            .limit(1)
-        )
-        rate_card_row = result.scalar_one_or_none()
+        """Build a cost model from the brief and rate card.
 
-        if not rate_card_row:
-            return self._fallback_model(brief)
-
-        rate_card = {
-            "offerings": rate_card_row.offerings,
-            "hourly_rates": rate_card_row.hourly_rates,
-            "multipliers": rate_card_row.multipliers,
-            "pass_through_markup": rate_card_row.pass_through_markup,
-            "standard_options": rate_card_row.standard_options,
-            "standard_revisions": rate_card_row.standard_revisions,
-        }
+        Precedence: per-proposal override > agency master > fallback.
+        """
+        if rate_card_override is not None:
+            rate_card = {
+                "offerings": rate_card_override.get("offerings", {}),
+                "hourly_rates": rate_card_override.get("hourly_rates", {}),
+                "multipliers": rate_card_override.get("multipliers", {}),
+                "pass_through_markup": rate_card_override.get("pass_through_markup", 0.18),
+                "standard_options": rate_card_override.get("standard_options", 3),
+                "standard_revisions": rate_card_override.get("standard_revisions", 2),
+            }
+            source = "override"
+        elif rate_card_row is not None and (rate_card_row.offerings or rate_card_row.hourly_rates):
+            rate_card = {
+                "offerings": rate_card_row.offerings,
+                "hourly_rates": rate_card_row.hourly_rates,
+                "multipliers": rate_card_row.multipliers,
+                "pass_through_markup": rate_card_row.pass_through_markup,
+                "standard_options": rate_card_row.standard_options,
+                "standard_revisions": rate_card_row.standard_revisions,
+            }
+            source = "agency"
+        else:
+            model = self._fallback_model(brief)
+            model.source = "fallback"
+            return model
 
         deliverables = brief.get("project", {}).get("deliverables", [])
         if not deliverables:
-            return self._fallback_model(brief)
+            model = self._fallback_model(brief)
+            model.source = source
+            return model
 
         # Flatten rate card packages into a lookup
         package_index = self._build_package_index(rate_card["offerings"])
@@ -161,7 +167,6 @@ class CostModelBuilder:
 
         discount_amount = self._round_price(subtotal * discount_percent / 100)
         total = subtotal - discount_amount
-        gst_rate = rate_card_row.pass_through_markup if rate_card_row else 0.18
         gst_amount = self._round_price(total * 0.18)  # GST always 18%
         grand_total = total + gst_amount
 
@@ -177,6 +182,7 @@ class CostModelBuilder:
             currency="INR",
             multipliers_applied=multipliers_applied,
         )
+        model.source = source
 
         # Speculative execution: always pre-compute tiered pricing
         model.tiered = self._build_tiered(line_items, discount_percent)
@@ -360,7 +366,9 @@ class CostModelBuilder:
             )
             for d in deliverables
         ]
-        return CostModel(line_items=items, pricing_notes="No rate card configured. Set up your rate card in Settings.")
+        model = CostModel(line_items=items, pricing_notes="No rate card configured. Set up your rate card in Settings.")
+        model.source = "fallback"
+        return model
 
     @staticmethod
     def _round_price(amount: float) -> int:
@@ -398,4 +406,5 @@ class CostModelBuilder:
             "multipliers_applied": model.multipliers_applied,
             "tiered": model.tiered,
             "pricing_notes": model.pricing_notes,
+            "source": model.source,
         }

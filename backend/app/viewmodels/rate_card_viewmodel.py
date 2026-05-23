@@ -41,6 +41,35 @@ class RateCardViewModel(ViewModelBase):
         update_data = data.model_dump(exclude_unset=True)
         return await self.repo.update(rate_card_id, **update_data)
 
+    async def add_missing_entries(
+        self,
+        agency_id: UUID,
+        hourly_rates: dict[str, int],
+        offerings: dict[str, dict],
+    ) -> RateCard:
+        """Additively merge new entries into the agency's active rate card.
+
+        Existing keys are never overwritten. If no active rate card exists,
+        creates one with just these entries.
+        """
+        rc = await self.repo.get_active(agency_id)
+        if rc is None:
+            rc = await self.repo.create(
+                agency_id=agency_id,
+                version="v1",
+                is_active=True,
+                hourly_rates=hourly_rates,
+                offerings=offerings,
+            )
+        else:
+            merged_rates = {**hourly_rates, **rc.hourly_rates}
+            merged_offerings = {**offerings, **rc.offerings}
+            rc.hourly_rates = merged_rates
+            rc.offerings = merged_offerings
+            await self._db.commit()
+            await self._db.refresh(rc)
+        return rc
+
     async def create_version(self, agency_id: UUID, data: CreateVersionRequest) -> RateCard:
         current = await self.repo.get_active(agency_id)
 

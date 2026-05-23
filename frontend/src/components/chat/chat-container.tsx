@@ -4,15 +4,18 @@ import { useSendMessage } from '../../api/proposals'
 import { MessageBubble, TypingIndicator, ProgressTracker } from './message-bubble'
 import { ChatInput } from './chat-input'
 import { ContextCheck } from './context-check'
+import { RateGapCard } from './rate-gap-card'
+import type { RateCardGaps } from '../../types/proposal'
 
 interface Props {
   proposalId: string
   clientId?: string
   clientName?: string
   clientHasContext?: boolean
+  rateCardGaps?: RateCardGaps | null
 }
 
-export function ChatContainer({ proposalId, clientId, clientName, clientHasContext }: Props) {
+export function ChatContainer({ proposalId, clientId, clientName, clientHasContext, rateCardGaps }: Props) {
   const messages = useChatStore((s) => s.messages)
   const isSending = useChatStore((s) => s.isSending)
   const isTyping = useChatStore((s) => s.isTyping)
@@ -64,6 +67,9 @@ export function ChatContainer({ proposalId, clientId, clientName, clientHasConte
         ))}
         {progress.length > 0 && <ProgressTracker items={progress} />}
         {isTyping && <TypingIndicator />}
+        {rateCardGaps != null ? (
+          <RateGapCard proposalId={proposalId} gaps={rateCardGaps} />
+        ) : null}
         <div ref={messagesEndRef} />
       </div>
 

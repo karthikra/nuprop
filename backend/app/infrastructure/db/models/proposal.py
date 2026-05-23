@@ -49,6 +49,8 @@ class Proposal(BaseModel):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     engagement_score: Mapped[int] = mapped_column(Integer, default=0)
     pipeline_state: Mapped[dict] = mapped_column(JSONColumn, default=dict)
+    rate_card_gaps: Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
+    rate_card_override: Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
 
     agency = relationship("Agency", back_populates="proposals")
     client = relationship("Client", back_populates="proposals")
