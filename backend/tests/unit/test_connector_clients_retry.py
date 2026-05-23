@@ -91,3 +91,54 @@ async def test_slack_search_messages_routes_through_retry_wrapper():
     assert results == []
     assert captured["method"] == "GET"
     assert captured["url"].endswith("/search.messages")
+
+
+@pytest.mark.asyncio
+async def test_gmail_exchange_code_passes_max_attempts_1():
+    """OAuth authorization codes are single-use — exchange_code must NOT retry."""
+    captured: dict = {}
+
+    async def fake_retry(method, url, *, max_attempts=4, **kwargs):
+        captured["max_attempts"] = max_attempts
+        return SimpleNamespace(json=lambda: {"access_token": "a", "refresh_token": "r"})
+
+    with patch(
+        "app.infrastructure.external.gmail_client.request_with_retry", new=fake_retry
+    ):
+        await GmailClient().exchange_code("code123")
+
+    assert captured["max_attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_gmail_revoke_token_passes_max_attempts_1():
+    """Token revocation is best-effort — revoke_token must NOT retry."""
+    captured: dict = {}
+
+    async def fake_retry(method, url, *, max_attempts=4, **kwargs):
+        captured["max_attempts"] = max_attempts
+        return SimpleNamespace(json=lambda: {})
+
+    with patch(
+        "app.infrastructure.external.gmail_client.request_with_retry", new=fake_retry
+    ):
+        await GmailClient().revoke_token("tok")
+
+    assert captured["max_attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_slack_exchange_code_passes_max_attempts_1():
+    """OAuth authorization codes are single-use — slack exchange_code must NOT retry."""
+    captured: dict = {}
+
+    async def fake_retry(method, url, *, max_attempts=4, **kwargs):
+        captured["max_attempts"] = max_attempts
+        return SimpleNamespace(json=lambda: {"ok": True})
+
+    with patch(
+        "app.infrastructure.external.slack_client.request_with_retry", new=fake_retry
+    ):
+        await SlackClient().exchange_code("code123")
+
+    assert captured["max_attempts"] == 1

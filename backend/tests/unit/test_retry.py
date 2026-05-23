@@ -102,3 +102,21 @@ async def test_raises_last_transport_error_after_exhausting_attempts():
             transport=httpx.MockTransport(handler), max_attempts=3,
         )
     assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_retry_after_is_capped_at_max(monkeypatch):
+    """A misbehaving / malicious server sending Retry-After: 120 must not
+    stall the connector for two minutes — the 60s cap kicks in."""
+    seen: list[float] = []
+
+    async def _record(seconds):
+        seen.append(seconds)
+
+    monkeypatch.setattr(_retry, "_sleep", _record)
+    handler, _ = _counting_handler([(429, {"Retry-After": "120"}), 200])
+    resp = await request_with_retry(
+        "GET", "https://x.test/y", transport=httpx.MockTransport(handler)
+    )
+    assert resp.status_code == 200
+    assert seen == [60.0]  # capped from 120
