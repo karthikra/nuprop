@@ -5,6 +5,14 @@ on:
     branches: [main]
   workflow_dispatch:  # Also allow manual re-deploy from the Actions UI
 
+# Serialize deploys per branch so back-to-back pushes (e.g. `feat: merge` +
+# `docs: tidy`) don't race on `alembic upgrade head` in the release_command.
+# cancel-in-progress: false queues the next deploy instead of killing the
+# in-flight one — safer when a migration is mid-DDL.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
