@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { screen, waitFor } from '@testing-library/react'
@@ -8,6 +8,8 @@ import { renderWithProviders } from '../../../test/utils'
 import { GmailConnectorCard } from '../gmail-connector-card'
 
 describe('GmailConnectorCard', () => {
+  beforeEach(() => { vi.restoreAllMocks() })
+
   it('shows the loading state while status is being fetched', () => {
     server.use(
       http.get(`${API}/connectors/gmail/status`, async () => {
