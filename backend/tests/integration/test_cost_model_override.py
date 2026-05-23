@@ -10,7 +10,7 @@ from app.services.ai.cost_model_builder import CostModelBuilder
 async def test_build_uses_override_when_present(monkeypatch):
     """When rate_card_override is set, CostModelBuilder uses it directly
     and tags the result with source='override'."""
-    brief = {"deliverables": [{"name": "Strategy doc", "category": "strategy"}]}
+    brief = {"project": {"deliverables": [{"name": "Strategy doc", "category": "strategy"}]}}
     override = {
         "hourly_rates": {"senior_strategist": 5000},
         "offerings": {"strategy_pack": {"name": "Strategy Pack", "base_price": 200000}},
@@ -31,7 +31,7 @@ async def test_build_uses_override_when_present(monkeypatch):
 @pytest.mark.asyncio
 async def test_build_uses_agency_when_no_override(monkeypatch):
     """Without an override, fall back to the agency rate card."""
-    brief = {"deliverables": []}
+    brief = {"project": {"deliverables": [{"category": "logo", "details": "brand mark", "quantity": 1}]}}
     agency_rc = MagicMock()
     agency_rc.offerings = {"x": {"name": "x", "base_price": 1}}
     agency_rc.hourly_rates = {"r": 100}

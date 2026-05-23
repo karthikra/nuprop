@@ -114,3 +114,4 @@ def test_model_to_dict_roundtrips_line_items_and_totals():
     assert d["multipliers_applied"] == ["existing_client"]
     assert d["line_items"][0]["deliverable"] == "Logo"
     assert d["line_items"][0]["quantity"] == 2
+    assert d["source"] == "fallback"
