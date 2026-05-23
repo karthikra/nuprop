@@ -1,11 +1,12 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-23 (S7 frontend follow-ups shipped + deployed)
-**Latest commit on `main`:** `284ae3a` (S7 merge commit). Pushed; auto-deploy run triggered.
-**Working tree:** clean. On `main`. In sync with `origin/main`.
+**Last updated:** 2026-05-24 (S8 smart rate card shipped, not yet merged to main)
+**Latest commit on `main`:** `c8c4423`. S8 lives on branch `worktree-s8-smart-rate-card` pending merge.
+**Working tree:** clean inside the S8 worktree. `main` is still in sync with `origin/main`.
 **Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of this session the proposal pipeline now consumes client context (S5 — backend, not directly visible in the UI).
 
 **M16-M20 roadmap status:** S1–S7 COMPLETE. All M16-M20 work — backend + frontend — is fully shipped.
+**Post-roadmap slices:** S8 (smart rate card) COMPLETE — see "What happened this session" below.
 
 ---
 
@@ -80,6 +81,44 @@ Check for leftover worktrees from this session: `git worktree list`. If `s5-pipe
 - **`sync_emails` is fine** — its 401→400 fix already shipped 2026-05-21.
 - **`pricing_model`** — S5 carries it in the merged config but `CostModelBuilder` doesn't branch on it (no alternative pricing path exists). If you want it to actually do something, that's a fresh design conversation: *what is the alternative pricing model?*
 - Other future-work items are listed in each slice's spec under "Future work".
+
+---
+
+## What happened this session (2026-05-24 — S8)
+
+Shipped **S8 — smart rate card**: rate-card gaps are detected the moment the brief is analysed, surface as a chat fill-card after the template gate, and can be resolved three ways — manual fill (additive to the agency rate card), Excel import (per-proposal override), or skip (use estimated defaults).
+
+### Architecture
+
+- **Gap detection (backend).** New `services/ai/rate_gap_analyzer.py`. `PipelineService.analyze_brief` calls it post-commit and writes `proposal.rate_card_gaps` if the agency's active rate card is missing any needed entries.
+- **Pause point (backend).** `ChatViewModel.approve_gate("template", ...)` short-circuits if `rate_card_gaps` is set — `run_research` is NOT enqueued until the gaps are cleared.
+- **Resume paths (backend).** Three endpoints under `/proposals/{id}/rate-card-gaps`: `/fill` (merges into agency master), `/skip` (clears without modifying), and the `/rate-card-import` + `/rate-card-import/confirm` pair (writes per-proposal override). All three enqueue `run_research`.
+- **Cost-model precedence (backend).** `CostModelBuilder.build` now consults override → agency → fallback in that order and stamps `cost_model.source` so the frontend can show which one was used. (Note: the builder signature was refactored away from `db`/`agency_id` parameters — the pipeline now resolves the active rate card via `RateCardRepository.get_active` before calling build.)
+- **Excel parsing (backend).** New `services/rate_card_excel_parser.py` uses `openpyxl` for the read and `AIService.complete_json` for the structured extraction. Empty rows are stripped before the LLM call; a warning fires when the prompt exceeds 50k chars; the confirm body is validated by a `RateCardConfirmBody` Pydantic schema.
+- **Chat fill-card (frontend).** New `components/chat/rate-gap-card.tsx` renders when `proposal.rate_card_gaps != null`. Three actions in one card: manual fill (with field-level validation and a disabled submit until all fields are positive integers), Excel drop with surfaced upload errors, and skip. Confirm dismisses the preview on success via the corrected `['proposals', proposalId]` query-key invalidation.
+
+### Schema
+
+Migration `04_proposal_rate_card_columns` adds two nullable JSON columns to `proposals`: `rate_card_gaps` and `rate_card_override`. No backfill.
+
+### Test counts
+
+- Backend: 359 → **375** (+16 across gap-analyzer, integration, endpoints, override, import)
+- Frontend: 256 → **260** (+4 for the rate-gap-card)
+
+### Non-goals (deferred)
+
+- Multi-dimensional rate cards (per-client / per-job overrides at the agency master level).
+- Editing existing rate-card entries from the chat — fill only ever ADDS.
+- `.csv` / `.xls` / Google Sheets import (only `.xlsx` for now).
+- Multi-currency rates.
+- Saving an imported override back to the agency master.
+
+### Known follow-ups
+
+- `_no_network` autouse fixture in `tests/conftest.py` only blocks the `AnthropicClient` facade methods, not `AIService.complete_json` directly. The S8 analyzer + Excel parser are failure-safe so this isn't a real test-flake risk today, but a future direct `AIService` caller without a try/except wouldn't be caught.
+- The `rate-gap-card`'s preview is rendered as raw JSON via `<pre>JSON.stringify(...)</pre>`. Acceptable for v1; a polished preview with `low_confidence_fields` badges would be a UX win.
+- The agency-master `RateCardViewModel.add_missing_entries` auto-creates a fresh rate card with `version="v1"` if no active one exists. If an agency has multiple historical rate cards, this is the right default; if a deeper version-bump policy is needed, that's a separate slice.
 
 ---
 
