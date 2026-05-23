@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_agency_id
@@ -15,6 +15,7 @@ from app.domain.schemas.proposal_schemas import (
 )
 from app.infrastructure.db.database import get_db
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+from app.services.rate_card_excel_parser import MAX_BYTES, parse_and_extract
 from app.viewmodels.proposal_viewmodel import ProposalViewModel
 from app.viewmodels.rate_card_viewmodel import RateCardViewModel
 
@@ -164,3 +165,64 @@ async def skip_rate_card_gaps(
         "run_research", str(proposal_id), _job_id=f"{proposal_id}:run_research"
     )
     return Response(status_code=204)
+
+
+@router.post("/{proposal_id}/rate-card-import", status_code=200)
+async def import_rate_card_xlsx(
+    proposal_id: UUID,
+    file: UploadFile = File(...),
+    request: Request = None,
+    agency_id: UUID = Depends(get_current_agency_id),
+    db: AsyncSession = Depends(get_db),
+):
+    proposal_repo = ProposalRepository(db)
+    proposal = await proposal_repo.get_by_id(proposal_id)
+    if not proposal or str(proposal.agency_id) != str(agency_id):
+        raise HTTPException(status_code=404, detail="Proposal not found")
+
+    if not file.filename or not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are supported")
+
+    content = await file.read()
+    if len(content) > MAX_BYTES:
+        raise HTTPException(status_code=400, detail=f"File exceeds {MAX_BYTES // (1024 * 1024)} MB limit")
+
+    try:
+        preview = await parse_and_extract(content)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Could not parse spreadsheet: {exc}")
+
+    return preview  # NOT persisted — frontend must call /confirm with the (possibly edited) preview
+
+
+@router.post("/{proposal_id}/rate-card-import/confirm", status_code=200)
+async def confirm_rate_card_import(
+    proposal_id: UUID,
+    body: dict,
+    request: Request,
+    agency_id: UUID = Depends(get_current_agency_id),
+    db: AsyncSession = Depends(get_db),
+):
+    proposal_repo = ProposalRepository(db)
+    proposal = await proposal_repo.get_by_id(proposal_id)
+    if not proposal or str(proposal.agency_id) != str(agency_id):
+        raise HTTPException(status_code=404, detail="Proposal not found")
+
+    override = {
+        "hourly_rates": body.get("hourly_rates") or {},
+        "offerings": body.get("offerings") or {},
+        "multipliers": body.get("multipliers") or {},
+    }
+
+    await proposal_repo.update(
+        proposal_id,
+        rate_card_override=override,
+        rate_card_gaps=None,
+    )
+    await db.commit()
+
+    await request.app.state.arq_pool.enqueue_job(
+        "run_research", str(proposal_id),
+        _job_id=f"{proposal_id}:run_research",
+    )
+    return {"ok": True}
