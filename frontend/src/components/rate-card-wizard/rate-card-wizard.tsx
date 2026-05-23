@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Offering, Multiplier } from '../../types/rate-card'
 import { DEFAULT_PAYLOAD, type RateCardPayload } from './types'
 import { WizardShell } from './wizard-shell'
@@ -30,6 +30,18 @@ export function RateCardWizard({ onSubmit, saving }: Props) {
     standard_options:    DEFAULT_PAYLOAD.standard_options,
     standard_revisions:  DEFAULT_PAYLOAD.standard_revisions,
   })
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Clear any pending notice-dismiss timer on unmount so an unmounted
+  // wizard doesn't fire a stale setState.
+  useEffect(() => {
+    return () => {
+      if (noticeTimerRef.current !== null) {
+        clearTimeout(noticeTimerRef.current)
+      }
+    }
+  }, [])
 
   const isLast = subStep === STEPS.length - 1
   const continueLabel = isLast ? 'Finish rate card →' : 'Save & Continue →'
@@ -45,6 +57,24 @@ export function RateCardWizard({ onSubmit, saving }: Props) {
     onSubmit(filterPayload(offerings, hourlyRates, multipliers, globals))
   }
 
+  const handleSkip = () => {
+    if (isLast) {
+      // Skipping the last step submits the wizard — no notice (it's not a defer).
+      handleContinue()
+      return
+    }
+    advance()
+    // Cancel any already-pending dismiss timer so successive skips don't stack.
+    if (noticeTimerRef.current !== null) {
+      clearTimeout(noticeTimerRef.current)
+    }
+    setNotice('You can fill this in later in Settings.')
+    noticeTimerRef.current = setTimeout(() => {
+      setNotice(null)
+      noticeTimerRef.current = null
+    }, 5000)
+  }
+
   return (
     <WizardShell
       subStep={subStep}
@@ -52,9 +82,10 @@ export function RateCardWizard({ onSubmit, saving }: Props) {
       title={STEPS[subStep].title}
       subtitle={STEPS[subStep].subtitle}
       onBack={subStep > 0 ? goBack : undefined}
-      onSkip={isLast ? handleContinue : advance}
+      onSkip={handleSkip}
       onContinue={handleContinue}
       continueLabel={continueLabel}
+      notice={notice ?? undefined}
       disabled={saving}
     >
       {subStep === 0 && <OfferingsStep    value={offerings}    onChange={setOfferings} />}

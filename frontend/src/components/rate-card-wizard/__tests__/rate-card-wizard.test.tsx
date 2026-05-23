@@ -116,4 +116,86 @@ describe('RateCardWizard', () => {
     await user.click(screen.getByRole('button', { name: /skip this section/i }))
     expect(onSubmit).toHaveBeenCalledOnce()
   })
+
+  it('shows the amber skip-notice when an intermediate step is skipped', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    vi.useFakeTimers()
+    try {
+      render(<RateCardWizard onSubmit={vi.fn()} saving={false} />)
+      await user.click(screen.getByRole('button', { name: /skip this section/i }))
+      expect(
+        screen.getByText(/you can fill this in later in settings/i),
+      ).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('auto-dismisses the skip-notice after 5 seconds', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    vi.useFakeTimers()
+    try {
+      render(<RateCardWizard onSubmit={vi.fn()} saving={false} />)
+      await user.click(screen.getByRole('button', { name: /skip this section/i }))
+      expect(
+        screen.getByText(/you can fill this in later in settings/i),
+      ).toBeInTheDocument()
+      vi.advanceTimersByTime(5000)
+      expect(
+        screen.queryByText(/you can fill this in later in settings/i),
+      ).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does NOT show the skip-notice when the LAST step is skipped (submits instead)', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(<RateCardWizard onSubmit={onSubmit} saving={false} />)
+
+    // Advance to the last step via Save & Continue three times.
+    await user.click(screen.getByRole('button', { name: /save & continue/i }))
+    await user.click(screen.getByRole('button', { name: /save & continue/i }))
+    await user.click(screen.getByRole('button', { name: /save & continue/i }))
+
+    // On the last step, "Skip this section" submits.
+    await user.click(screen.getByRole('button', { name: /skip this section/i }))
+    expect(onSubmit).toHaveBeenCalledOnce()
+    expect(
+      screen.queryByText(/you can fill this in later in settings/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it('consecutive skips cancel the prior timer — notice does not stack', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    vi.useFakeTimers()
+    try {
+      render(<RateCardWizard onSubmit={vi.fn()} saving={false} />)
+      // First skip (step 0 → 1)
+      await user.click(screen.getByRole('button', { name: /skip this section/i }))
+      expect(
+        screen.getByText(/you can fill this in later in settings/i),
+      ).toBeInTheDocument()
+      // 4 seconds in — notice still visible (timer not yet expired)
+      vi.advanceTimersByTime(4000)
+      // Second skip (step 1 → 2) — must cancel the first 5s timer
+      await user.click(screen.getByRole('button', { name: /skip this section/i }))
+      expect(
+        screen.getByText(/you can fill this in later in settings/i),
+      ).toBeInTheDocument()
+      // 4 more seconds (8s after first skip, 4s after second) — still visible
+      vi.advanceTimersByTime(4000)
+      expect(
+        screen.getByText(/you can fill this in later in settings/i),
+      ).toBeInTheDocument()
+      // 1 more second (5s after the second skip) — now dismissed
+      vi.advanceTimersByTime(1000)
+      expect(
+        screen.queryByText(/you can fill this in later in settings/i),
+      ).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

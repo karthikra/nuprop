@@ -1,4 +1,5 @@
 import { useGmailStatus, useGmailAuthUrl, useGmailSync, useGmailDisconnect } from '../../api/connectors'
+import { formatApiError } from '../../api/client'
 
 export function GmailConnectorCard() {
   const { data: gmailStatus, isLoading: loadingGmail } = useGmailStatus()
@@ -7,9 +8,14 @@ export function GmailConnectorCard() {
   const disconnectGmail = useGmailDisconnect()
 
   const handleConnect = async () => {
-    const url = await getAuthUrl.mutateAsync()
-    if (url) {
-      window.open(url, 'gmail-auth', 'width=600,height=700,left=200,top=100')
+    try {
+      const url = await getAuthUrl.mutateAsync()
+      if (url) {
+        window.open(url, 'gmail-auth', 'width=600,height=700,left=200,top=100')
+      }
+    } catch {
+      // React Query captures the error in getAuthUrl.isError; the inline
+      // red block below renders it. Nothing more to do at the call site.
     }
   }
 
@@ -37,13 +43,20 @@ export function GmailConnectorCard() {
           Google OAuth not configured. Add <code className="bg-amber-100 px-1 rounded">GOOGLE_CLIENT_ID</code> and <code className="bg-amber-100 px-1 rounded">GOOGLE_CLIENT_SECRET</code> to your .env file.
         </div>
       ) : !gmailStatus?.connected ? (
-        <button
-          onClick={handleConnect}
-          disabled={getAuthUrl.isPending}
-          className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
-        >
-          {getAuthUrl.isPending ? 'Connecting...' : 'Connect Gmail'}
-        </button>
+        <div className="space-y-3">
+          <button
+            onClick={handleConnect}
+            disabled={getAuthUrl.isPending}
+            className="rounded-lg bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-800 disabled:opacity-50"
+          >
+            {getAuthUrl.isPending ? 'Connecting...' : 'Connect Gmail'}
+          </button>
+          {getAuthUrl.isError ? (
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+              {formatApiError(getAuthUrl.error, 'Gmail connect failed')}
+            </div>
+          ) : null}
+        </div>
       ) : (
         <div className="space-y-3">
           <div className="grid grid-cols-3 gap-4 text-sm">
@@ -78,6 +91,11 @@ export function GmailConnectorCard() {
               Disconnect
             </button>
           </div>
+          {disconnectGmail.isError ? (
+            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+              {formatApiError(disconnectGmail.error, 'Gmail disconnect failed')}
+            </div>
+          ) : null}
           {syncGmail.isSuccess && syncGmail.data && (
             <div className="rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
               Synced {syncGmail.data.new_emails} new emails from {syncGmail.data.domains_synced.length} domains in {syncGmail.data.duration_seconds}s.

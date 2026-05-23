@@ -1,11 +1,11 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-23 (S6 connector resilience shipped + deployed)
-**Latest commit on `main`:** `6b72415` (S6 merge commit). Pushed; auto-deploy run `26323662473` triggered.
-**Working tree:** clean. On `main`. In sync with `origin/main`.
+**Last updated:** 2026-05-23 (S7 frontend follow-ups shipped, not yet merged to main)
+**Latest commit on `main`:** `e34cc32` (S6 + tidy). S7 lives on branch `worktree-s7-frontend-followups` pending merge.
+**Working tree:** clean inside the S7 worktree. `main` is still in sync with `origin/main`.
 **Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of this session the proposal pipeline now consumes client context (S5 — backend, not directly visible in the UI).
 
-**M16-M20 roadmap status:** S1–S6 COMPLETE. The original plan is fully shipped; the 3 deferred frontend follow-ups (ContextBriefToggle cache, connector-card error surfacing, rate-card wizard skip-notice) are now tracked as S7.
+**M16-M20 roadmap status:** S1–S7 COMPLETE. All M16-M20 work — backend + frontend — is fully shipped.
 
 ---
 
@@ -80,6 +80,34 @@ Check for leftover worktrees from this session: `git worktree list`. If `s5-pipe
 - **`sync_emails` is fine** — its 401→400 fix already shipped 2026-05-21.
 - **`pricing_model`** — S5 carries it in the merged config but `CostModelBuilder` doesn't branch on it (no alternative pricing path exists). If you want it to actually do something, that's a fresh design conversation: *what is the alternative pricing model?*
 - Other future-work items are listed in each slice's spec under "Future work".
+
+---
+
+## What happened this session (2026-05-23 — S7)
+
+Shipped **S7 — frontend follow-ups**, the final M16-M20 slice. Three small UX gaps deferred from S2/S3/rate-card wizard, plus a piece of test-infrastructure work that surfaced during the rate-card-wizard tests:
+
+- **ContextBriefToggle refetches after invalidation.** The local `cached` state was dropped in favor of React Query's own cache with `staleTime: 5 * 60 * 1000` and `gcTime: 5 * 60 * 1000` set on the query (the per-query `gcTime` overrides the test QueryClient's `gcTime: 0` default). After `useContextSave` / `useResetContext` invalidates the brief query, the next open of the toggle refetches automatically.
+- **Gmail and Slack connector cards surface connect + disconnect errors.** Both cards now render an inline red `formatApiError` block when `getAuthUrl` or `disconnect` mutations fail. Drive and Calendar cards have no OAuth/disconnect flow and were left untouched. Both `handleConnect` functions wrap `mutateAsync` in a try/catch so the rejection doesn't surface as an unhandled promise rejection in the test runner.
+- **Rate-card wizard skip-notice wired.** `WizardShell.notice` was always there; `RateCardWizard` now populates it: clicking "Skip this section" on an intermediate step shows "You can fill this in later in Settings." for 5 seconds. The timer is cleared on unmount and on consecutive skips so it never stacks. Last-step skip still submits and shows no notice.
+- **Test infrastructure compatibility patch.** `src/test/setup.ts` overrides `@testing-library/react`'s `asyncWrapper` to detect vitest fake timers (the default only checks `typeof jest`, which vitest never sets), and wraps `vi.advanceTimersByTime` in `React.act()` so React 19 concurrent-mode state updates from fired timer callbacks flush synchronously. The TODO comment in that file documents the removal condition (when `@testing-library/dom >= 11` ships vitest-aware fake-timer detection).
+
+### Commits (on branch `worktree-s7-frontend-followups`)
+
+- Task 1 (`1ea56d8`) — ContextBriefToggle drops local cache, useContextBrief gains staleTime/gcTime.
+- Task 2 (`1b39ce1`) — Gmail card surfaces getAuthUrl + disconnect errors.
+- Task 2 fix (`ca6d4c1`) — both cards' handleConnect wraps mutateAsync in try/catch.
+- Task 3 (`034e78f`) — Slack card surfaces getAuthUrl + disconnect errors.
+- Task 4 (`93671a5`) — Rate-card wizard skip-notice wiring.
+- Task 4 test infra (`b705ca9`, `876e8eb`) — vitest+React 19 fake-timer compatibility patch.
+
+### Test counts
+
+- Frontend: **255 passing** (was 247 — +8 S7 tests)
+- Backend: 359 passing (unchanged — S7 is frontend-only)
+- Migration head: `03_proposal_context_brief` (no schema change)
+
+S7 is the last roadmap slice. M16-M20 is done.
 
 ---
 

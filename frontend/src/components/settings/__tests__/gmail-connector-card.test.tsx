@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { screen, waitFor } from '@testing-library/react'
 import { server } from '../../../test/mocks/server'
@@ -7,6 +8,8 @@ import { renderWithProviders } from '../../../test/utils'
 import { GmailConnectorCard } from '../gmail-connector-card'
 
 describe('GmailConnectorCard', () => {
+  beforeEach(() => { vi.restoreAllMocks() })
+
   it('shows the loading state while status is being fetched', () => {
     server.use(
       http.get(`${API}/connectors/gmail/status`, async () => {
@@ -64,5 +67,44 @@ describe('GmailConnectorCard', () => {
     expect(screen.getByText('42')).toBeInTheDocument() // email_count
     expect(screen.getByRole('button', { name: /sync now/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /disconnect/i })).toBeInTheDocument()
+  })
+
+  it('renders an inline error when Connect Gmail (getAuthUrl) fails', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get(`${API}/connectors/gmail/status`, () =>
+        HttpResponse.json({ connected: false, configured: true, email: null, last_sync: null, email_count: 0 }),
+      ),
+      http.get(`${API}/connectors/gmail/auth-url`, () =>
+        HttpResponse.json({ detail: 'OAuth provider unavailable' }, { status: 500 }),
+      ),
+    )
+    renderWithProviders(<GmailConnectorCard />)
+    const connectBtn = await screen.findByRole('button', { name: /connect gmail/i })
+    await user.click(connectBtn)
+    await waitFor(() =>
+      expect(screen.getByText(/OAuth provider unavailable/i)).toBeInTheDocument(),
+    )
+  })
+
+  it('renders an inline error when Disconnect Gmail fails', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    server.use(
+      http.get(`${API}/connectors/gmail/status`, () =>
+        HttpResponse.json({
+          connected: true, configured: true, email: 'me@acme.com', last_sync: null, email_count: 0,
+        }),
+      ),
+      http.delete(`${API}/connectors/gmail`, () =>
+        HttpResponse.json({ detail: 'Disconnect failed' }, { status: 500 }),
+      ),
+    )
+    renderWithProviders(<GmailConnectorCard />)
+    const disconnectBtn = await screen.findByRole('button', { name: /^disconnect$/i })
+    await user.click(disconnectBtn)
+    await waitFor(() =>
+      expect(screen.getByText(/Disconnect failed/i)).toBeInTheDocument(),
+    )
   })
 })

@@ -101,4 +101,36 @@ describe('ContextBriefToggle', () => {
     // The previous client's brief must NOT be rendered
     expect(screen.queryByText(/brief for c1/i)).not.toBeInTheDocument()
   })
+
+  it('refetches the brief after the query is invalidated (e.g. after context save/reset)', async () => {
+    const user = userEvent.setup()
+    let calls = 0
+    server.use(
+      http.get(`${API}/clients/c1/context-brief`, () => {
+        calls += 1
+        return HttpResponse.json({
+          brief: calls === 1 ? 'first brief' : 'second brief',
+          has_context: true,
+          email_count: 0,
+        })
+      }),
+    )
+    const { queryClient } = renderWithProviders(<ContextBriefToggle clientId="c1" />)
+
+    // Open the toggle — first fetch.
+    await user.click(screen.getByRole('button', { name: /show what the AI sees/i }))
+    await waitFor(() => expect(screen.getByText(/first brief/i)).toBeInTheDocument())
+    expect(calls).toBe(1)
+
+    // Close the toggle.
+    await user.click(screen.getByRole('button', { name: /hide what the AI sees/i }))
+
+    // Simulate a context-save / context-reset mutation invalidating the brief query.
+    await queryClient.invalidateQueries({ queryKey: ['client-context-brief', 'c1'] })
+
+    // Reopen — must refetch because the query is now stale.
+    await user.click(screen.getByRole('button', { name: /show what the AI sees/i }))
+    await waitFor(() => expect(screen.getByText(/second brief/i)).toBeInTheDocument())
+    expect(calls).toBe(2)
+  })
 })

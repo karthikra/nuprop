@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useContextBrief, type ContextBrief } from '../../api/clients'
+import { useState } from 'react'
+import { useContextBrief } from '../../api/clients'
 
 interface ContextBriefToggleProps {
   clientId: string
@@ -7,28 +7,7 @@ interface ContextBriefToggleProps {
 
 export function ContextBriefToggle({ clientId }: ContextBriefToggleProps) {
   const [open, setOpen] = useState(false)
-  const [cached, setCached] = useState<ContextBrief | null>(null)
-  const { data, isLoading } = useContextBrief(clientId, open && cached === null)
-
-  // Once we receive data, store it in local state so close+reopen is instant
-  // without hitting Bedrock again. Known limitation: this cache survives
-  // `useResetContext` / `useContextSave` invalidation of the query key — the
-  // user may see a stale brief until the component remounts (e.g., page
-  // refresh). Tracked as S6 follow-up; the cross-mutation case is rare in
-  // practice (user resets then immediately reopens the brief).
-  useEffect(() => {
-    if (data != null) {
-      setCached(data)
-    }
-  }, [data])
-
-  // Reset local cache when clientId changes — otherwise we'd render the
-  // previous client's brief if this component instance is reused.
-  useEffect(() => {
-    setCached(null)
-  }, [clientId])
-
-  const brief = cached ?? data
+  const { data: brief, isLoading } = useContextBrief(clientId, open)
 
   return (
     <div className="mt-3 border-t border-indigo-200 pt-3">
