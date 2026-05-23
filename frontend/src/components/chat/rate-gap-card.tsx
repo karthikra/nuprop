@@ -99,12 +99,72 @@ export function RateGapCard({ proposalId, gaps }: Props) {
       </p>
 
       {preview ? (
-        <div className="rounded-lg bg-white border border-stone-200 p-3 space-y-2">
+        <div className="rounded-lg bg-white border border-stone-200 p-3 space-y-3">
           <h4 className="text-sm font-medium text-stone-900">Parsed preview</h4>
-          <pre className="text-xs text-stone-700 whitespace-pre-wrap">
-            {JSON.stringify(preview, null, 2)}
-          </pre>
-          <div className="flex gap-2">
+
+          {Object.keys(preview.hourly_rates).length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-stone-600">Hourly rates</p>
+              {Object.entries(preview.hourly_rates).map(([k, v]) => {
+                const lowConfidence = (preview.low_confidence_fields ?? []).some(
+                  f => f === `role.${k}` || f === `hourly_rates.${k}` || f === k,
+                )
+                return (
+                  <div
+                    key={k}
+                    className={`flex justify-between text-xs px-2 py-1 rounded ${
+                      lowConfidence ? 'bg-amber-100 text-amber-900' : 'text-stone-700'
+                    }`}
+                  >
+                    <span>{lowConfidence ? '⚠ ' : ''}{k}</span>
+                    <span>₹{v}/hr</span>
+                  </div>
+                )
+              })}
+            </div>
+          ) : null}
+
+          {Object.keys(preview.offerings).length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-stone-600">Offerings</p>
+              {Object.entries(preview.offerings).map(([k, o]) => {
+                const lowConfidence = (preview.low_confidence_fields ?? []).some(
+                  f => f === `offering.${k}` || f === `offerings.${k}` || f === k,
+                )
+                return (
+                  <div
+                    key={k}
+                    className={`flex justify-between text-xs px-2 py-1 rounded ${
+                      lowConfidence ? 'bg-amber-100 text-amber-900' : 'text-stone-700'
+                    }`}
+                  >
+                    <span>{lowConfidence ? '⚠ ' : ''}{o.name}</span>
+                    <span>₹{o.base_price}</span>
+                  </div>
+                )
+              })}
+            </div>
+          ) : null}
+
+          {preview.multipliers && Object.keys(preview.multipliers).length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-stone-600">Multipliers</p>
+              {Object.entries(preview.multipliers).map(([k, v]) => (
+                <div key={k} className="flex justify-between text-xs text-stone-700 px-2 py-1">
+                  <span>{k}</span>
+                  <span>{v}×</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {(preview.low_confidence_fields?.length ?? 0) > 0 ? (
+            <p className="text-xs text-amber-700">
+              ⚠ Amber-highlighted entries were extracted with low confidence — double-check before confirming.
+            </p>
+          ) : null}
+
+          <div className="flex gap-2 pt-2">
             <button
               onClick={onConfirmPreview}
               disabled={confirm.isPending}

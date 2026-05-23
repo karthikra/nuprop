@@ -72,5 +72,7 @@ class ProposalResponse(BaseModel):
     template_id: str | None = None
     preferences: dict
     pipeline_state: dict
+    rate_card_gaps: dict | None = None
+    rate_card_override: dict | None = None
     created_at: datetime
     updated_at: datetime

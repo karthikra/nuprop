@@ -8,6 +8,7 @@ from app.infrastructure.db.models.client import Client
 from app.infrastructure.db.models.proposal import Proposal, ProposalStatus
 from app.infrastructure.db.models.rate_card import RateCard
 from app.services.pipeline_service import PipelineService
+from tests.conftest import API
 
 
 @pytest.fixture
@@ -135,3 +136,52 @@ async def test_template_gate_does_not_enqueue_research_when_gaps_exist(
     assert enqueued == []  # no enqueue while gaps exist
     await db.refresh(proposal)
     assert proposal.pipeline_state.get("current_phase") == "rate_card_gaps"
+
+
+@pytest.mark.asyncio
+async def test_get_proposal_includes_rate_card_gaps(client, registered):
+    """GET /api/v1/proposals/{id} must include rate_card_gaps in the response body.
+
+    Regression guard for the ProposalResponse schema omission — FastAPI's
+    response_model silently strips undeclared fields, so this test confirms
+    the field round-trips correctly.
+    """
+    # Create a client + proposal via the API
+    c_resp = await client.post(
+        f"{API}/clients", headers=registered.headers, json={"name": "Gap Test Client"}
+    )
+    assert c_resp.status_code == 201
+    c_data = c_resp.json()
+
+    p_resp = await client.post(
+        f"{API}/proposals",
+        headers=registered.headers,
+        json={"client_id": c_data["id"], "project_name": "Gap Round-Trip Test"},
+    )
+    assert p_resp.status_code == 201
+    proposal_id = p_resp.json()["id"]
+
+    # Directly write rate_card_gaps into the DB (simulating analyze_brief output)
+    from app.infrastructure.db.database import async_session_factory
+    from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+
+    known_gaps = {
+        "missing_roles": ["senior_strategist"],
+        "missing_offerings": ["annual_retainer"],
+        "needed_roles": ["senior_strategist"],
+        "needed_offerings": ["annual_retainer"],
+    }
+    async with async_session_factory() as session:
+        repo = ProposalRepository(session)
+        await repo.update(proposal_id, rate_card_gaps=known_gaps)
+        await session.commit()
+
+    # Fetch via the API and assert the field is present
+    get_resp = await client.get(
+        f"{API}/proposals/{proposal_id}", headers=registered.headers
+    )
+    assert get_resp.status_code == 200
+    data = get_resp.json()
+    assert "rate_card_gaps" in data, "rate_card_gaps must be present in ProposalResponse"
+    assert data["rate_card_gaps"]["missing_roles"] == ["senior_strategist"]
+    assert data["rate_card_gaps"]["missing_offerings"] == ["annual_retainer"]

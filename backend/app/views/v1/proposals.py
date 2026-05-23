@@ -29,6 +29,16 @@ class RateCardConfirmBody(BaseModel):
     multipliers: dict[str, int | float] = {}
 
 
+class _FillOffering(BaseModel):
+    name: str
+    base_price: int
+
+
+class RateCardFillBody(BaseModel):
+    hourly_rates: dict[str, int | float] = {}
+    offerings: dict[str, _FillOffering] = {}
+
+
 def get_vm(request: Request, db: AsyncSession = Depends(get_db)) -> ProposalViewModel:
     return ProposalViewModel(request, db)
 
@@ -107,7 +117,7 @@ async def update_preferences(
 @router.post("/{proposal_id}/rate-card-gaps/fill", status_code=200)
 async def fill_rate_card_gaps(
     proposal_id: UUID,
-    body: dict,
+    body: RateCardFillBody,
     request: Request,
     agency_id: UUID = Depends(get_current_agency_id),
     db: AsyncSession = Depends(get_db),
@@ -123,8 +133,8 @@ async def fill_rate_card_gaps(
     allowed_role_keys = set(gaps.get("missing_roles", []))
     allowed_offering_keys = set(gaps.get("missing_offerings", []))
 
-    submitted_rates = body.get("hourly_rates") or {}
-    submitted_offerings = body.get("offerings") or {}
+    submitted_rates = body.hourly_rates
+    submitted_offerings = {k: v.model_dump() for k, v in body.offerings.items()}
 
     for k in submitted_rates:
         if k not in allowed_role_keys:
@@ -215,6 +225,16 @@ async def confirm_rate_card_import(
         raise HTTPException(status_code=404, detail="Proposal not found")
 
     override = body.model_dump()
+    # Normalize multipliers from flat {"key": value} to {"key": {"value": value}}
+    # to match the shape CostModelBuilder reads from agency master rate cards.
+    multipliers = override.get("multipliers") or {}
+    normalized_multipliers: dict[str, dict] = {}
+    for key, value in multipliers.items():
+        if isinstance(value, dict):
+            normalized_multipliers[key] = value
+        else:
+            normalized_multipliers[key] = {"value": value}
+    override["multipliers"] = normalized_multipliers
 
     await proposal_repo.update(
         proposal_id,
