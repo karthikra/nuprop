@@ -8,9 +8,14 @@ export function GmailConnectorCard() {
   const disconnectGmail = useGmailDisconnect()
 
   const handleConnect = async () => {
-    const url = await getAuthUrl.mutateAsync()
-    if (url) {
-      window.open(url, 'gmail-auth', 'width=600,height=700,left=200,top=100')
+    try {
+      const url = await getAuthUrl.mutateAsync()
+      if (url) {
+        window.open(url, 'gmail-auth', 'width=600,height=700,left=200,top=100')
+      }
+    } catch {
+      // React Query captures the error in getAuthUrl.isError; the inline
+      // red block below renders it. Nothing more to do at the call site.
     }
   }
 
