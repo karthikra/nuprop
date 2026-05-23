@@ -68,6 +68,7 @@ export function BuilderPage() {
             clientId={proposal.client_id}
             clientName={client?.name}
             clientHasContext={!!client?.context_profile && Object.keys(client.context_profile).length > 0}
+            rateCardGaps={proposal.rate_card_gaps}
           />
         </main>
         <PreferencePanel proposal={proposal} templateConfig={template?.config} />

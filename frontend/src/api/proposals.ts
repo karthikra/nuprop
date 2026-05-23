@@ -77,3 +77,67 @@ export function useSendIdeationMessage() {
     },
   })
 }
+
+export function useFillRateCardGaps(proposalId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: {
+      hourly_rates: Record<string, number>
+      offerings: Record<string, { name: string; base_price: number }>
+    }) => {
+      const { data } = await api.post(
+        `/proposals/${proposalId}/rate-card-gaps/fill`,
+        body,
+      )
+      return data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposal', proposalId] }),
+  })
+}
+
+export function useSkipRateCardGaps(proposalId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      await api.post(`/proposals/${proposalId}/rate-card-gaps/skip`)
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposal', proposalId] }),
+  })
+}
+
+export function useImportRateCardXlsx(proposalId: string) {
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const form = new FormData()
+      form.append('file', file)
+      const { data } = await api.post(
+        `/proposals/${proposalId}/rate-card-import`,
+        form,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      return data as {
+        hourly_rates: Record<string, number>
+        offerings: Record<string, { name: string; base_price: number }>
+        multipliers: Record<string, number>
+        low_confidence_fields: string[]
+      }
+    },
+  })
+}
+
+export function useConfirmRateCardImport(proposalId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (preview: {
+      hourly_rates: Record<string, number>
+      offerings: Record<string, { name: string; base_price: number }>
+      multipliers?: Record<string, number>
+    }) => {
+      await api.post(
+        `/proposals/${proposalId}/rate-card-import/confirm`,
+        preview,
+      )
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposal', proposalId] }),
+  })
+}

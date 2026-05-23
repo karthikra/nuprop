@@ -1,3 +1,10 @@
+export interface RateCardGaps {
+  missing_roles: string[]
+  missing_offerings: string[]
+  needed_roles: string[]
+  needed_offerings: string[]
+}
+
 export interface Proposal {
   id: string
   agency_id: string
@@ -8,6 +15,7 @@ export interface Proposal {
   template_id: string | null
   preferences: Record<string, unknown>
   pipeline_state: PipelineState
+  rate_card_gaps: RateCardGaps | null
   created_at: string
   updated_at: string
 }
