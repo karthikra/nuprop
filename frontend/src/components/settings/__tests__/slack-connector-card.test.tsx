@@ -133,4 +133,43 @@ describe('SlackConnectorCard', () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(deleted).toBe(false)
   })
+
+  it('renders an inline error when Connect Slack (getAuthUrl) fails', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get(`${API}/connectors/slack/status`, () =>
+        HttpResponse.json({ connected: false, configured: true, workspace: null, last_sync: null }),
+      ),
+      http.get(`${API}/connectors/slack/auth-url`, () =>
+        HttpResponse.json({ detail: 'Slack OAuth provider unavailable' }, { status: 500 }),
+      ),
+    )
+    renderWithProviders(<SlackConnectorCard />)
+    const connectBtn = await screen.findByRole('button', { name: /connect slack/i })
+    await user.click(connectBtn)
+    await waitFor(() =>
+      expect(screen.getByText(/Slack OAuth provider unavailable/i)).toBeInTheDocument(),
+    )
+  })
+
+  it('renders an inline error when Disconnect Slack fails', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    server.use(
+      http.get(`${API}/connectors/slack/status`, () =>
+        HttpResponse.json({
+          connected: true, configured: true, workspace: 'acme-team', last_sync: null,
+        }),
+      ),
+      http.delete(`${API}/connectors/slack`, () =>
+        HttpResponse.json({ detail: 'Slack disconnect failed' }, { status: 500 }),
+      ),
+    )
+    renderWithProviders(<SlackConnectorCard />)
+    const disconnectBtn = await screen.findByRole('button', { name: /^disconnect$/i })
+    await user.click(disconnectBtn)
+    await waitFor(() =>
+      expect(screen.getByText(/Slack disconnect failed/i)).toBeInTheDocument(),
+    )
+  })
 })
