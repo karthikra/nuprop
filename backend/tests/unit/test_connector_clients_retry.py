@@ -5,7 +5,10 @@ from unittest.mock import patch
 
 import pytest
 
+from app.infrastructure.external.gcal_client import GCalClient
+from app.infrastructure.external.gdrive_client import GDriveClient
 from app.infrastructure.external.gmail_client import GmailClient
+from app.infrastructure.external.slack_client import SlackClient
 
 
 @pytest.mark.asyncio
@@ -28,11 +31,6 @@ async def test_gmail_get_user_email_routes_through_retry_wrapper():
     assert captured["url"].endswith("/users/me/profile")
 
 
-from app.infrastructure.external.gcal_client import GCalClient
-from app.infrastructure.external.gdrive_client import GDriveClient
-from app.infrastructure.external.slack_client import SlackClient
-
-
 @pytest.mark.asyncio
 async def test_gdrive_search_files_routes_through_retry_wrapper():
     client = GDriveClient()
@@ -40,6 +38,7 @@ async def test_gdrive_search_files_routes_through_retry_wrapper():
 
     async def fake_retry(method, url, **kwargs):
         captured["method"] = method
+        captured["url"] = url
         return SimpleNamespace(json=lambda: {"files": [{"id": "f1"}]})
 
     with patch(
@@ -49,6 +48,7 @@ async def test_gdrive_search_files_routes_through_retry_wrapper():
 
     assert files == [{"id": "f1"}]
     assert captured["method"] == "GET"
+    assert captured["url"].endswith("/files")
 
 
 @pytest.mark.asyncio
@@ -58,6 +58,7 @@ async def test_gcal_search_events_routes_through_retry_wrapper():
 
     async def fake_retry(method, url, **kwargs):
         captured["method"] = method
+        captured["url"] = url
         return SimpleNamespace(json=lambda: {"items": [{"id": "e1"}]})
 
     with patch(
@@ -67,6 +68,7 @@ async def test_gcal_search_events_routes_through_retry_wrapper():
 
     assert events == [{"id": "e1"}]
     assert captured["method"] == "GET"
+    assert captured["url"].endswith("/calendars/primary/events")
 
 
 @pytest.mark.asyncio
@@ -76,6 +78,7 @@ async def test_slack_search_messages_routes_through_retry_wrapper():
 
     async def fake_retry(method, url, **kwargs):
         captured["method"] = method
+        captured["url"] = url
         return SimpleNamespace(
             json=lambda: {"ok": True, "messages": {"matches": []}}
         )
@@ -87,3 +90,4 @@ async def test_slack_search_messages_routes_through_retry_wrapper():
 
     assert results == []
     assert captured["method"] == "GET"
+    assert captured["url"].endswith("/search.messages")

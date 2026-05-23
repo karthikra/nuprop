@@ -37,7 +37,8 @@ class SlackClient:
         return f"{self.OAUTH_AUTH_URL}?{urlencode(params)}"
 
     async def exchange_code(self, code: str) -> dict:
-        r = await request_with_retry("POST", self.OAUTH_TOKEN_URL, data={
+        # max_attempts=1: OAuth authorization codes are single-use (RFC 6749) — retrying is futile
+        r = await request_with_retry("POST", self.OAUTH_TOKEN_URL, max_attempts=1, data={
             "code": code,
             "client_id": self._settings.SLACK_CLIENT_ID,
             "client_secret": self._settings.SLACK_CLIENT_SECRET,
