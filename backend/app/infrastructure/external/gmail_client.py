@@ -134,14 +134,14 @@ class GmailClient:
             date = parsedate_to_datetime(date_str)
         except (TypeError, ValueError) as exc:
             logger.warning(
-                "gmail message date parse failed; defaulting to now()",
+                "gmail message date unparseable; leaving date unset",
                 extra={
                     "event": "connector.gmail.bad_date",
                     "raw": date_str[:40],
                     "error": str(exc),
                 },
             )
-            date = datetime.now()
+            date = None
 
         return {
             "id": data["id"],

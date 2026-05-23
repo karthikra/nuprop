@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -48,3 +49,32 @@ async def test_fetch_recent_messages_bounded_when_pagetoken_never_ends():
 
     assert out == []
     assert calls["n"] == 50
+
+
+@pytest.mark.asyncio
+async def test_get_message_returns_none_date_on_unparseable_header():
+    """An unparseable Date header must not be disguised as a real
+    timestamp — get_message returns date=None and lets the persistence
+    layer apply its timezone-aware fallback."""
+    client = GmailClient()
+    payload = {
+        "id": "m1",
+        "threadId": "t1",
+        "snippet": "",
+        "payload": {
+            "headers": [
+                {"name": "From", "value": "a@acme.com"},
+                {"name": "Date", "value": "not-a-real-date"},
+            ]
+        },
+    }
+
+    async def fake_retry(_method, _url, **_kwargs):
+        return SimpleNamespace(json=lambda: payload)
+
+    with patch(
+        "app.infrastructure.external.gmail_client.request_with_retry", new=fake_retry
+    ):
+        msg = await client.get_message("tok", "m1")
+
+    assert msg["date"] is None
