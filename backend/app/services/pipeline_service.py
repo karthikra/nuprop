@@ -380,12 +380,13 @@ class PipelineService:
         )
 
         await self._emit_progress(proposal_id, "cost_model", "searching", "Building cost model from rate card...")
+        rc_repo = RateCardRepository(self.session)
+        rate_card_row = await rc_repo.get_active(proposal.agency_id)
         model = await CostModelBuilder().build(
-            brief=proposal.brief,
-            db=self.session,
-            agency_id=str(proposal.agency_id),
-            benchmarks_md=proposal.benchmarks,
+            brief=proposal.brief or {},
+            rate_card_row=rate_card_row,
             template_config=effective_config,
+            rate_card_override=proposal.rate_card_override,
         )
         cost_dict = CostModelBuilder.model_to_dict(model)
         await self.proposal_repo.update(proposal.id, cost_model=cost_dict)
