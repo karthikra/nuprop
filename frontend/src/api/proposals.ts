@@ -91,7 +91,7 @@ export function useFillRateCardGaps(proposalId: string) {
       )
       return data
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposal', proposalId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposals', proposalId] }),
   })
 }
 
@@ -101,7 +101,7 @@ export function useSkipRateCardGaps(proposalId: string) {
     mutationFn: async () => {
       await api.post(`/proposals/${proposalId}/rate-card-gaps/skip`)
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposal', proposalId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposals', proposalId] }),
   })
 }
 
@@ -138,6 +138,6 @@ export function useConfirmRateCardImport(proposalId: string) {
         preview,
       )
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposal', proposalId] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposals', proposalId] }),
   })
 }

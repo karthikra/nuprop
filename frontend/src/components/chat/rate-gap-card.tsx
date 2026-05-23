@@ -45,6 +45,17 @@ export function RateGapCard({ proposalId, gaps }: Props) {
   )
   const [preview, setPreview] = useState<PreviewShape | null>(null)
 
+  const manualFillValid = (
+    gaps.missing_roles.every(k => {
+      const v = parseInt(rateValues[k] ?? '', 10)
+      return Number.isFinite(v) && v > 0
+    }) &&
+    gaps.missing_offerings.every(k => {
+      const v = parseInt(offeringValues[k]?.base_price ?? '', 10)
+      return Number.isFinite(v) && v > 0
+    })
+  )
+
   const onSubmitManual = () => {
     const hourly_rates: Record<string, number> = {}
     for (const k of gaps.missing_roles) {
@@ -65,8 +76,12 @@ export function RateGapCard({ proposalId, gaps }: Props) {
   const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const result = await imp.mutateAsync(file).catch(() => null)
-    if (result) setPreview(result)
+    try {
+      const result = await imp.mutateAsync(file)
+      if (result) setPreview(result)
+    } catch {
+      // React Query captures the error in imp.isError; we render it below.
+    }
   }
 
   const onConfirmPreview = () => {
@@ -118,6 +133,12 @@ export function RateGapCard({ proposalId, gaps }: Props) {
             />
           </label>
 
+          {imp.isError ? (
+            <div className="rounded-lg bg-red-50 border border-red-200 p-2 text-xs text-red-700">
+              Upload failed — please check the file is a valid .xlsx and under 5 MB.
+            </div>
+          ) : null}
+
           <div className="border-t border-amber-200 pt-3 space-y-2">
             <p className="text-xs text-stone-600">Or fill manually:</p>
             {gaps.missing_roles.map(role => (
@@ -159,7 +180,7 @@ export function RateGapCard({ proposalId, gaps }: Props) {
           <div className="flex gap-2 pt-2">
             <button
               onClick={onSubmitManual}
-              disabled={fill.isPending}
+              disabled={fill.isPending || !manualFillValid}
               className="rounded-lg bg-stone-900 px-4 py-1.5 text-xs font-medium text-white disabled:opacity-50"
             >
               {fill.isPending ? 'Saving…' : 'Fill and continue'}
