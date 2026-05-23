@@ -1,11 +1,11 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-22 (S5 pipeline integration shipped + deployed)
-**Latest commit on `main`:** `f073dfe` (S5 merge commit). Pushed; auto-deploy run `26272615236` triggered.
-**Working tree:** clean. On `main`. In sync with `origin/main`.
+**Last updated:** 2026-05-23 (S6 connector resilience shipped, not yet merged to main)
+**Latest commit on `main`:** `f073dfe` (S5 merge commit, deployed). S6 lives on branch `worktree-s6-connector-resilience` pending merge.
+**Working tree:** clean inside the S6 worktree. `main` is still in sync with `origin/main`.
 **Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of this session the proposal pipeline now consumes client context (S5 — backend, not directly visible in the UI).
 
-**M16-M20 roadmap status:** S1–S5 COMPLETE. Only S6 (backend polish, deferrable) remains of the original plan.
+**M16-M20 roadmap status:** S1–S6 COMPLETE. The original plan is fully shipped; the 3 deferred frontend follow-ups (ContextBriefToggle cache, connector-card error surfacing, rate-card wizard skip-notice) are now tracked as S7.
 
 ---
 
@@ -76,10 +76,80 @@ Check for leftover worktrees from this session: `git worktree list`. If `s5-pipe
 
 ### 4. Pick the next slice
 
-- **S6 — backend polish** (~1d, deferrable): ContextBriefToggle cache survives invalidation (S2 follow-up); `getAuthUrl.isError`/`disconnectSlack.isError` surfacing in connector cards (S3 follow-up); rate-card wizard's timed yellow skip-notice; retry/backoff on connector calls.
+- **S7 — frontend follow-ups** (~0.5d): ContextBriefToggle cache survives invalidation (S2 follow-up); `getAuthUrl.isError` / `disconnectSlack.isError` surfacing in connector cards (S3 follow-up); rate-card wizard's timed yellow skip-notice. Needs a fresh brainstorm → spec → plan cycle.
 - **`sync_emails` is fine** — its 401→400 fix already shipped 2026-05-21.
 - **`pricing_model`** — S5 carries it in the merged config but `CostModelBuilder` doesn't branch on it (no alternative pricing path exists). If you want it to actually do something, that's a fresh design conversation: *what is the alternative pricing model?*
 - Other future-work items are listed in each slice's spec under "Future work".
+
+---
+
+## What happened this session (2026-05-23)
+
+Shipped **S6 — connector resilience & backend hardening**, the last roadmap slice. Brainstorm → spec → 10-task plan → subagent-driven execution → final regression.
+
+S6 makes the four connector HTTP clients resilient to transient provider failures and closes the remaining audit-flagged HIGH backend hardening items.
+
+### Commits (on branch `worktree-s6-connector-resilience`)
+
+- S6 spec + plan: `ab24989` (spec), `fdf8bdf` (spec amendment), `4202a91` (plan)
+- Task 1 — retry wrapper: `fca15e2`, `5ed05e8` (review fixes: -O-safe exhaustion guard, Retry-After cap, transport-exhaustion test)
+- Task 2 — gmail_client migration: `c18d403`, `294f129` (revoke_token max_attempts=1)
+- Task 3 — Drive/Cal/Slack migration: `517367c`, `730d264` (OAuth exchange_code max_attempts=1, test polish)
+- Task 4 — gmail pagination cap: `aedf593`
+- Task 5 — gmail bad-date returns None: `92f403a`
+- Task 6 — `_extract_domains` @ guard: `76c64b3`
+- Task 7 — LLM call timeout: `57608b4`
+- Task 8 — client_repo cap raise: `e630e2e`
+
+### Test counts
+
+- Backend: **355 passing** (was 339 — +16 S6 tests)
+- Frontend: 247 passing (unchanged — S6 is backend-only)
+- Migration head: `03_proposal_context_brief` (no schema change in S6)
+
+### Architecture: S6 at a glance
+
+```
+Two pieces —
+
+A. Shared retry/backoff wrapper
+   New module: app/infrastructure/external/_retry.py
+   exposing request_with_retry(method, url, *, timeout=30.0,
+   max_attempts=4, transport=None, **kwargs) -> httpx.Response.
+   Retries 429/5xx and httpx.TransportError; never retries other 4xx
+   (a 401 invalid_grant must surface). Honors Retry-After (capped at
+   60s). Exponential backoff with jitter otherwise. -O-safe exhaustion
+   guard. The single policy point — all four connector clients
+   (gmail/gdrive/gcal/slack) route through it. OAuth code exchanges
+   (gmail.exchange_code, slack.exchange_code) and gmail.revoke_token
+   override max_attempts=1: authorization codes are single-use and
+   revokes are best-effort; retrying either is pure latency cost.
+
+B. Hardening fixes
+   - gmail_client: MAX_PAGE_ITERATIONS=50 caps both pagination loops
+     against the pathological "0 messages + non-null pageToken" loop.
+   - gmail_client.get_message: unparseable Date header returns date=None
+     instead of naive datetime.now(); the existing viewmodel coercion
+     (msg["date"] if isinstance(msg["date"], datetime) else now) applies
+     a tz-aware fallback at persist time. No schema change required.
+   - connector_viewmodel._extract_domains: skips contacts whose email
+     lacks an "@", matching the existing guard pattern in the file.
+   - services/llm.py: LLM_TIMEOUT_SECONDS=120.0 passed to
+     AsyncAnthropicBedrock so a hung Bedrock call can't stall a phase.
+   - client_repo.search default limit 50 → 500.
+```
+
+### Lessons from this session
+
+- The plan committed three small spec corrections against the real code before implementation began (line 259 was already @-guarded; the date fallback lives in gmail_client not the viewmodel; the LLM timeout belongs in AIService, not the AnthropicClient facade). S5's amend-and-flag lesson held.
+- Two code-quality reviews caught the OAuth-code-exchange retry issue (Tasks 2 and 3): authorization codes are single-use (RFC 6749), so retrying after a 5xx wastes latency on a guaranteed failure. `max_attempts=1` is the right answer for any best-effort or single-use call.
+- The pagination test used a `_SAFETY_BOUND = 200` to fail cleanly instead of hanging the suite when the cap is missing — a small TDD pattern worth remembering.
+
+### Gotchas worth keeping
+
+- **`raise_for_status` is inside the wrapper.** Don't call `r.raise_for_status()` again on the returned response — it's already raised before the wrapper returns to you.
+- **`HTTPStatusError` and `TransportError` are both `httpx.HTTPError` subclasses.** Existing `except httpx.HTTPError` clauses in `gdrive.get_file_content_text` and `gmail.revoke_token` correctly catch everything the wrapper can raise.
+- **Per-attempt `AsyncClient`.** The wrapper opens a fresh `httpx.AsyncClient` per attempt (matches the prior per-call pattern). Connection pooling is not preserved across the wrapper; this is intentional — a retry on a broken connection benefits from a fresh client.
 
 ---
 

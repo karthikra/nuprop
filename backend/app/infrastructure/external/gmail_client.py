@@ -8,8 +8,14 @@ from urllib.parse import urlencode
 import httpx
 
 from app.core.config import get_settings
+from app.infrastructure.external._retry import request_with_retry
 
 logger = logging.getLogger(__name__)
+
+# Hard cap on Gmail search pagination — comfortably above any real
+# `limit / batch_size`. Bounds the pathological case where Google returns
+# 0 messages but a non-null `nextPageToken`.
+MAX_PAGE_ITERATIONS = 50
 
 
 class GmailClient:
@@ -43,41 +49,39 @@ class GmailClient:
         return f"{self.OAUTH_AUTH_URL}?{urlencode(params)}"
 
     async def exchange_code(self, code: str) -> dict:
-        async with httpx.AsyncClient() as client:
-            r = await client.post(self.OAUTH_TOKEN_URL, data={
-                "code": code,
-                "client_id": self._settings.GOOGLE_CLIENT_ID,
-                "client_secret": self._settings.GOOGLE_CLIENT_SECRET,
-                "redirect_uri": self._settings.GOOGLE_REDIRECT_URI,
-                "grant_type": "authorization_code",
-            })
-            r.raise_for_status()
-            return r.json()
+        # max_attempts=1: OAuth authorization codes are single-use (RFC 6749) — retrying is futile
+        r = await request_with_retry("POST", self.OAUTH_TOKEN_URL, max_attempts=1, data={
+            "code": code,
+            "client_id": self._settings.GOOGLE_CLIENT_ID,
+            "client_secret": self._settings.GOOGLE_CLIENT_SECRET,
+            "redirect_uri": self._settings.GOOGLE_REDIRECT_URI,
+            "grant_type": "authorization_code",
+        })
+        return r.json()
 
     async def refresh_access_token(self, refresh_token: str) -> str:
-        async with httpx.AsyncClient() as client:
-            r = await client.post(self.OAUTH_TOKEN_URL, data={
-                "refresh_token": refresh_token,
-                "client_id": self._settings.GOOGLE_CLIENT_ID,
-                "client_secret": self._settings.GOOGLE_CLIENT_SECRET,
-                "grant_type": "refresh_token",
-            })
-            r.raise_for_status()
-            return r.json()["access_token"]
+        r = await request_with_retry("POST", self.OAUTH_TOKEN_URL, data={
+            "refresh_token": refresh_token,
+            "client_id": self._settings.GOOGLE_CLIENT_ID,
+            "client_secret": self._settings.GOOGLE_CLIENT_SECRET,
+            "grant_type": "refresh_token",
+        })
+        return r.json()["access_token"]
 
     async def get_user_email(self, access_token: str) -> str:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{self.GMAIL_API}/users/me/profile",
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
-            r.raise_for_status()
-            return r.json()["emailAddress"]
+        r = await request_with_retry(
+            "GET",
+            f"{self.GMAIL_API}/users/me/profile",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        return r.json()["emailAddress"]
 
     async def revoke_token(self, token: str) -> None:
         try:
-            async with httpx.AsyncClient() as client:
-                await client.post(self.OAUTH_REVOKE_URL, params={"token": token})
+            # max_attempts=1: revoke is best-effort fire-and-forget; retrying adds latency for no gain
+            await request_with_retry(
+                "POST", self.OAUTH_REVOKE_URL, params={"token": token}, max_attempts=1
+            )
         except httpx.HTTPError as exc:
             logger.warning(
                 "gmail token revoke failed (best-effort)",
@@ -93,31 +97,29 @@ class GmailClient:
         if page_token:
             params["pageToken"] = page_token
 
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{self.GMAIL_API}/users/me/messages",
-                headers={"Authorization": f"Bearer {access_token}"},
-                params=params,
-            )
-            r.raise_for_status()
-            data = r.json()
+        r = await request_with_retry(
+            "GET",
+            f"{self.GMAIL_API}/users/me/messages",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params=params,
+        )
+        data = r.json()
 
         messages = data.get("messages", [])
         next_token = data.get("nextPageToken")
         return messages, next_token
 
     async def get_message(self, access_token: str, message_id: str) -> dict:
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{self.GMAIL_API}/users/me/messages/{message_id}",
-                headers={"Authorization": f"Bearer {access_token}"},
-                params={
-                    "format": "metadata",
-                    "metadataHeaders": ["From", "To", "Subject", "Date"],
-                },
-            )
-            r.raise_for_status()
-            data = r.json()
+        r = await request_with_retry(
+            "GET",
+            f"{self.GMAIL_API}/users/me/messages/{message_id}",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={
+                "format": "metadata",
+                "metadataHeaders": ["From", "To", "Subject", "Date"],
+            },
+        )
+        data = r.json()
 
         headers = {}
         for h in data.get("payload", {}).get("headers", []):
@@ -132,14 +134,14 @@ class GmailClient:
             date = parsedate_to_datetime(date_str)
         except (TypeError, ValueError) as exc:
             logger.warning(
-                "gmail message date parse failed; defaulting to now()",
+                "gmail message date unparseable; leaving date unset",
                 extra={
                     "event": "connector.gmail.bad_date",
                     "raw": date_str[:40],
                     "error": str(exc),
                 },
             )
-            date = datetime.now()
+            date = None
 
         return {
             "id": data["id"],
@@ -161,8 +163,20 @@ class GmailClient:
 
         all_messages = []
         page_token = None
+        iterations = 0
 
         while len(all_messages) < limit:
+            iterations += 1
+            if iterations > MAX_PAGE_ITERATIONS:
+                logger.warning(
+                    "gmail pagination hit max iterations; stopping",
+                    extra={
+                        "event": "connector.gmail.pagination_cap",
+                        "domain": domain,
+                        "collected": len(all_messages),
+                    },
+                )
+                break
             batch_size = min(100, limit - len(all_messages))
             msg_refs, page_token = await self.search_messages(access_token, query, batch_size, page_token)
 
@@ -205,8 +219,20 @@ class GmailClient:
 
         all_messages: list[dict] = []
         page_token: str | None = None
+        iterations = 0
 
         while len(all_messages) < limit:
+            iterations += 1
+            if iterations > MAX_PAGE_ITERATIONS:
+                logger.warning(
+                    "gmail pagination hit max iterations; stopping",
+                    extra={
+                        "event": "connector.gmail.pagination_cap",
+                        "scan": "recent",
+                        "collected": len(all_messages),
+                    },
+                )
+                break
             batch_size = min(100, limit - len(all_messages))
             msg_refs, page_token = await self.search_messages(
                 access_token, query, batch_size, page_token,

@@ -27,6 +27,11 @@ from pydantic import BaseModel
 from app.core.config import get_settings
 
 
+# Hard ceiling on a single Bedrock call. Pipeline phases run as independent
+# ARQ jobs; without this a hung call stalls the whole phase indefinitely.
+LLM_TIMEOUT_SECONDS = 120.0
+
+
 class Tier(str, Enum):
     HEAVY = "heavy"          # Opus 4.7 — complex reasoning, agentic loops
     BALANCED = "balanced"    # Sonnet 4.6 — production default
@@ -60,7 +65,10 @@ class AIService:
 
     def __init__(self, aws_region: str | None = None, aws_profile: str | None = None):
         settings = get_settings()
-        kwargs: dict[str, Any] = {"aws_region": aws_region or settings.AWS_REGION}
+        kwargs: dict[str, Any] = {
+            "aws_region": aws_region or settings.AWS_REGION,
+            "timeout": LLM_TIMEOUT_SECONDS,
+        }
         # Only pass profile if explicitly set — otherwise let the SDK credential
         # chain (env vars, instance role) take over.
         profile = aws_profile if aws_profile is not None else settings.AWS_PROFILE

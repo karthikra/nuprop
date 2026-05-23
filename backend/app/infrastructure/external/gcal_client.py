@@ -3,9 +3,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 
-import httpx
-
 from app.core.config import get_settings
+from app.infrastructure.external._retry import request_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -32,15 +31,14 @@ class GCalClient:
             "singleEvents": "true",
             "orderBy": "startTime",
         }
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{self.CAL_API}/calendars/primary/events",
-                headers={"Authorization": f"Bearer {access_token}"},
-                params=params,
-                timeout=15,
-            )
-            r.raise_for_status()
-            return r.json().get("items", [])
+        r = await request_with_retry(
+            "GET",
+            f"{self.CAL_API}/calendars/primary/events",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params=params,
+            timeout=15,
+        )
+        return r.json().get("items", [])
 
     async def get_client_meeting_stats(
         self, access_token: str, client_name: str, months_back: int = 12,

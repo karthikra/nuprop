@@ -5,6 +5,7 @@ import logging
 import httpx
 
 from app.core.config import get_settings
+from app.infrastructure.external._retry import request_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -28,34 +29,32 @@ class GDriveClient:
             "fields": "files(id,name,mimeType,modifiedTime,owners,webViewLink,description)",
             "orderBy": "modifiedTime desc",
         }
-        async with httpx.AsyncClient() as client:
-            r = await client.get(
-                f"{self.DRIVE_API}/files",
-                headers={"Authorization": f"Bearer {access_token}"},
-                params=params,
-                timeout=15,
-            )
-            r.raise_for_status()
-            return r.json().get("files", [])
+        r = await request_with_retry(
+            "GET",
+            f"{self.DRIVE_API}/files",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params=params,
+            timeout=15,
+        )
+        return r.json().get("files", [])
 
     async def get_file_content_text(self, access_token: str, file_id: str) -> str:
         """Export a Google Doc/Sheet as plain text. For PDFs/DOCX, gets metadata only."""
-        async with httpx.AsyncClient() as client:
-            try:
-                r = await client.get(
-                    f"{self.DRIVE_API}/files/{file_id}/export",
-                    headers={"Authorization": f"Bearer {access_token}"},
-                    params={"mimeType": "text/plain"},
-                    timeout=15,
-                )
-                r.raise_for_status()
-                return r.text[:5000]  # Cap at 5K chars
-            except httpx.HTTPError as exc:
-                logger.warning(
-                    "Drive document export failed; returning empty content",
-                    extra={"event": "connector.drive.export_failed", "error": str(exc)},
-                )
-                return ""
+        try:
+            r = await request_with_retry(
+                "GET",
+                f"{self.DRIVE_API}/files/{file_id}/export",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"mimeType": "text/plain"},
+                timeout=15,
+            )
+            return r.text[:5000]  # Cap at 5K chars
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "Drive document export failed; returning empty content",
+                extra={"event": "connector.drive.export_failed", "error": str(exc)},
+            )
+            return ""
 
     async def search_client_documents(
         self, access_token: str, client_name: str, max_results: int = 10,
