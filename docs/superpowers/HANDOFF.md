@@ -1,8 +1,8 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-23 (S6 connector resilience shipped, not yet merged to main)
-**Latest commit on `main`:** `f073dfe` (S5 merge commit, deployed). S6 lives on branch `worktree-s6-connector-resilience` pending merge.
-**Working tree:** clean inside the S6 worktree. `main` is still in sync with `origin/main`.
+**Last updated:** 2026-05-23 (S6 connector resilience shipped + deployed)
+**Latest commit on `main`:** `6b72415` (S6 merge commit). Pushed; auto-deploy run `26323662473` triggered.
+**Working tree:** clean. On `main`. In sync with `origin/main`.
 **Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of this session the proposal pipeline now consumes client context (S5 — backend, not directly visible in the UI).
 
 **M16-M20 roadmap status:** S1–S6 COMPLETE. The original plan is fully shipped; the 3 deferred frontend follow-ups (ContextBriefToggle cache, connector-card error surfacing, rate-card wizard skip-notice) are now tracked as S7.
