@@ -1,8 +1,8 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-24 (S8 smart rate card shipped, not yet merged to main)
-**Latest commit on `main`:** `c8c4423`. S8 lives on branch `worktree-s8-smart-rate-card` pending merge.
-**Working tree:** clean inside the S8 worktree. `main` is still in sync with `origin/main`.
+**Last updated:** 2026-05-24 (S8 smart rate card shipped + deployed)
+**Latest commit on `main`:** `9a12a30` (S8 merge commit). Pushed; auto-deploy run triggered.
+**Working tree:** clean. On `main`. In sync with `origin/main`.
 **Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of this session the proposal pipeline now consumes client context (S5 — backend, not directly visible in the UI).
 
 **M16-M20 roadmap status:** S1–S7 COMPLETE. All M16-M20 work — backend + frontend — is fully shipped.
