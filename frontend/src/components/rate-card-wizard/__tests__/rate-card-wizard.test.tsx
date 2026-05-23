@@ -116,4 +116,54 @@ describe('RateCardWizard', () => {
     await user.click(screen.getByRole('button', { name: /skip this section/i }))
     expect(onSubmit).toHaveBeenCalledOnce()
   })
+
+  it('shows the amber skip-notice when an intermediate step is skipped', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    vi.useFakeTimers()
+    try {
+      render(<RateCardWizard onSubmit={vi.fn()} saving={false} />)
+      await user.click(screen.getByRole('button', { name: /skip this section/i }))
+      expect(
+        screen.getByText(/you can fill this in later in settings/i),
+      ).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('auto-dismisses the skip-notice after 5 seconds', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
+    vi.useFakeTimers()
+    try {
+      render(<RateCardWizard onSubmit={vi.fn()} saving={false} />)
+      await user.click(screen.getByRole('button', { name: /skip this section/i }))
+      expect(
+        screen.getByText(/you can fill this in later in settings/i),
+      ).toBeInTheDocument()
+      vi.advanceTimersByTime(5000)
+      expect(
+        screen.queryByText(/you can fill this in later in settings/i),
+      ).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does NOT show the skip-notice when the LAST step is skipped (submits instead)', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    render(<RateCardWizard onSubmit={onSubmit} saving={false} />)
+
+    // Advance to the last step via Save & Continue three times.
+    await user.click(screen.getByRole('button', { name: /save & continue/i }))
+    await user.click(screen.getByRole('button', { name: /save & continue/i }))
+    await user.click(screen.getByRole('button', { name: /save & continue/i }))
+
+    // On the last step, "Skip this section" submits.
+    await user.click(screen.getByRole('button', { name: /skip this section/i }))
+    expect(onSubmit).toHaveBeenCalledOnce()
+    expect(
+      screen.queryByText(/you can fill this in later in settings/i),
+    ).not.toBeInTheDocument()
+  })
 })
