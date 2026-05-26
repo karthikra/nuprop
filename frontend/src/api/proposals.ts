@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
-import type { Proposal, ProposalCreate, ProposalListItem, ChatMessage } from '../types/proposal'
+import type { Proposal, ProposalCreate, ProposalListItem, ChatMessage, Section, SectionType } from '../types/proposal'
 
 export function useProposals(status?: string) {
   return useQuery({
@@ -137,6 +137,50 @@ export function useConfirmRateCardImport(proposalId: string) {
         `/proposals/${proposalId}/rate-card-import/confirm`,
         preview,
       )
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposals', proposalId] }),
+  })
+}
+
+export function usePatchSection(proposalId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: {
+      type: SectionType
+      patch: { content?: string; included?: boolean; metadata?: Record<string, unknown> }
+    }) => {
+      const { data } = await api.patch<Section>(
+        `/proposals/${proposalId}/sections/${vars.type}`,
+        vars.patch,
+      )
+      return { type: vars.type, section: data }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposals', proposalId] }),
+  })
+}
+
+export function useRegenerateSection(proposalId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (type: SectionType) => {
+      const { data } = await api.post<Section>(
+        `/proposals/${proposalId}/sections/${type}/regenerate`,
+      )
+      return { type, section: data }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposals', proposalId] }),
+  })
+}
+
+export function useRefineSection(proposalId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: { type: SectionType; instructions: string }) => {
+      const { data } = await api.post<Section>(
+        `/proposals/${proposalId}/sections/${vars.type}/refine`,
+        { instructions: vars.instructions },
+      )
+      return { type: vars.type, section: data }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['proposals', proposalId] }),
   })

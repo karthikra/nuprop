@@ -11,6 +11,7 @@ import { ChatContainer } from '../../components/chat/chat-container'
 import { PreferencePanel } from '../../components/chat/preference-panel'
 import { IdeateButton } from '../../components/chat/ideate-button'
 import { IdeationDrawer } from '../../components/chat/ideation-drawer'
+import { SectionEditor } from '../../components/sections/section-editor'
 
 export function BuilderPage() {
   const { id } = useParams<{ id: string }>()
@@ -63,13 +64,17 @@ export function BuilderPage() {
       <div className="flex pt-14 h-screen">
         <PipelineSidebar proposal={proposal} clientName={client?.name} />
         <main className="flex-1 flex flex-col min-w-0">
-          <ChatContainer
-            proposalId={id!}
-            clientId={proposal.client_id}
-            clientName={client?.name}
-            clientHasContext={!!client?.context_profile && Object.keys(client.context_profile).length > 0}
-            rateCardGaps={proposal.rate_card_gaps}
-          />
+          {proposal.pipeline_state?.current_phase === 'section_editor' ? (
+            <SectionEditor proposal={proposal} />
+          ) : (
+            <ChatContainer
+              proposalId={id!}
+              clientId={proposal.client_id}
+              clientName={client?.name}
+              clientHasContext={!!client?.context_profile && Object.keys(client.context_profile).length > 0}
+              rateCardGaps={proposal.rate_card_gaps}
+            />
+          )}
         </main>
         <PreferencePanel proposal={proposal} templateConfig={template?.config} />
       </div>

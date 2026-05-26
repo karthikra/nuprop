@@ -16,6 +16,15 @@ export interface Proposal {
   preferences: Record<string, unknown>
   pipeline_state: PipelineState
   rate_card_gaps: RateCardGaps | null
+  cover_page: Section | null
+  executive_summary: Section | null
+  problem_statement: Section | null
+  proposed_solution: Section | null
+  scope_of_work: Section | null
+  timeline: Section | null
+  pricing: Section | null
+  qualifications: Section | null
+  terms_and_conditions: Section | null
   created_at: string
   updated_at: string
 }
@@ -117,4 +126,52 @@ export const STATUS_COLOURS: Record<string, string> = {
   won: 'bg-emerald-200 text-emerald-800',
   lost: 'bg-red-100 text-red-700',
   expired: 'bg-stone-200 text-stone-500',
+}
+
+export interface SectionAsset {
+  id: string
+  kind: 'image' | 'video' | 'audio'
+  s3_key: string
+  url: string
+  caption: string | null
+  ai_generated: boolean
+  prompt?: string | null
+  provider?: string | null
+  width?: number | null
+  height?: number | null
+  duration_s?: number | null
+  poster_s3_key?: string | null
+}
+
+export interface Section {
+  content: string
+  assets: SectionAsset[]
+  included: boolean
+  metadata: Record<string, unknown>
+}
+
+export const SECTION_ORDER = [
+  'cover_page',
+  'executive_summary',
+  'problem_statement',
+  'proposed_solution',
+  'scope_of_work',
+  'timeline',
+  'pricing',
+  'qualifications',
+  'terms_and_conditions',
+] as const
+
+export type SectionType = typeof SECTION_ORDER[number]
+
+export const SECTION_TITLES: Record<SectionType, string> = {
+  cover_page: 'Cover',
+  executive_summary: 'Executive summary',
+  problem_statement: 'Problem statement',
+  proposed_solution: 'Proposed solution',
+  scope_of_work: 'Scope of work',
+  timeline: 'Timeline',
+  pricing: 'Pricing',
+  qualifications: 'Qualifications',
+  terms_and_conditions: 'Terms & conditions',
 }
