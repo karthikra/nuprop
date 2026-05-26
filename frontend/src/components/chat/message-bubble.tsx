@@ -1,7 +1,6 @@
 import type { ChatMessage } from '../../types/proposal'
 import { ApprovalGate } from './approval-gate'
 import { CostModelCard } from './cost-model-card'
-import { NarrativePreview } from './narrative-preview'
 import { OutputReadyCard } from './output-ready-card'
 import { ResearchPlanCard } from './research-plan-card'
 import { ResearchActivityLog } from './research-activity-log'
@@ -72,11 +71,6 @@ export function MessageBubble({ message, proposalId }: Props) {
   // Cost model — interactive table
   if (message.message_type === 'cost_model' && extra?.requires_approval) {
     return <CostModelCard message={message} proposalId={proposalId} />
-  }
-
-  // Narrative preview — all sections with tabs + accordion
-  if (message.message_type === 'narrative_preview' && extra?.requires_approval) {
-    return <NarrativePreview message={message} proposalId={proposalId} />
   }
 
   // Output ready — download files
