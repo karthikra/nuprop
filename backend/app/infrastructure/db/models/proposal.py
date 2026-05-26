@@ -35,13 +35,6 @@ class Proposal(BaseModel):
     benchmarks: Mapped[str | None] = mapped_column(Text)
     context_brief: Mapped[str | None] = mapped_column(Text)
     cost_model: Mapped[dict] = mapped_column(JSONColumn, default=dict)
-    covering_letter: Mapped[str | None] = mapped_column(Text)
-    covering_letter_alt: Mapped[str | None] = mapped_column(Text)
-    executive_summary: Mapped[str | None] = mapped_column(Text)
-    scope_sections: Mapped[dict] = mapped_column(JSONColumn, default=list)
-    cost_rationale: Mapped[str | None] = mapped_column(Text)
-    terms: Mapped[str | None] = mapped_column(Text)
-    email_draft: Mapped[str | None] = mapped_column(Text)
     site_url: Mapped[str | None] = mapped_column(String(500))
     docx_path: Mapped[str | None] = mapped_column(String(500))
     pdf_path: Mapped[str | None] = mapped_column(String(500))
@@ -51,6 +44,20 @@ class Proposal(BaseModel):
     pipeline_state: Mapped[dict] = mapped_column(JSONColumn, default=dict)
     rate_card_gaps: Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
     rate_card_override: Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
+
+    # Section columns — each carries the full {content, assets, included, metadata}
+    # payload; NULL means "section not yet generated"; included=false means
+    # the user toggled it off. Canonical order lives in
+    # app/services/sections/__init__.py::SECTION_ORDER.
+    cover_page:           Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
+    executive_summary:    Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
+    problem_statement:    Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
+    proposed_solution:    Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
+    scope_of_work:        Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
+    timeline:             Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
+    pricing:              Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
+    qualifications:       Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
+    terms_and_conditions: Mapped[dict | None] = mapped_column(JSONColumn, nullable=True)
 
     agency = relationship("Agency", back_populates="proposals")
     client = relationship("Client", back_populates="proposals")
