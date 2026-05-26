@@ -268,12 +268,8 @@ class ChatViewModel(ViewModelBase):
                 "Template confirmed. Starting client research and market benchmarking...",
             ),
             "cost_model": (
-                "narrative_generation", "generate_narrative",
-                "Cost model approved. Writing the proposal narrative...",
-            ),
-            "narrative": (
-                "output_generation", "generate_outputs",
-                "Narrative approved. Generating DOCX, print-ready PDF, and email drafts...",
+                "sections", "generate_sections",
+                "Cost model approved. Drafting the proposal sections...",
             ),
         }
         if gate_id not in gate_map:
@@ -311,11 +307,6 @@ class ChatViewModel(ViewModelBase):
                 return pause_msg
         elif gate_id == "cost_model":
             pipeline["phases_completed"] = pipeline.get("phases_completed", []) + ["cost_model_review"]
-        elif gate_id == "narrative":
-            selected_letter = (gate_data or {}).get("selected_letter", "primary")
-            if selected_letter == "alt" and proposal.covering_letter_alt:
-                await self.proposal_repo.update(proposal.id, covering_letter=proposal.covering_letter_alt)
-            pipeline["phases_completed"] = pipeline.get("phases_completed", []) + ["narrative_review"]
 
         pipeline["current_phase"] = next_phase
         pipeline["job_status"] = {"phase": job_name, "state": "queued", "error": None}
