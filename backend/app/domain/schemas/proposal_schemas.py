@@ -74,5 +74,14 @@ class ProposalResponse(BaseModel):
     pipeline_state: dict
     rate_card_gaps: dict | None = None
     rate_card_override: dict | None = None
+    cover_page:           dict | None = None
+    executive_summary:    dict | None = None
+    problem_statement:    dict | None = None
+    proposed_solution:    dict | None = None
+    scope_of_work:        dict | None = None
+    timeline:             dict | None = None
+    pricing:              dict | None = None
+    qualifications:       dict | None = None
+    terms_and_conditions: dict | None = None
     created_at: datetime
     updated_at: datetime

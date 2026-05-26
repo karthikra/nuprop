@@ -96,7 +96,7 @@ async def test_run_ideation_does_not_mutate_proposal_fields(db, monkeypatch, mak
     await db.commit()
 
     before = (proposal.brief, proposal.research, proposal.cost_model,
-              proposal.covering_letter, proposal.pipeline_state)
+              proposal.executive_summary, proposal.pipeline_state)
 
     monkeypatch.setattr(
         "app.services.ideation_service.get_ai_service",
@@ -108,7 +108,7 @@ async def test_run_ideation_does_not_mutate_proposal_fields(db, monkeypatch, mak
     async with async_session_factory() as fresh:
         refetched = await ProposalRepository(fresh).get_by_id(pid)
         after = (refetched.brief, refetched.research, refetched.cost_model,
-                 refetched.covering_letter, refetched.pipeline_state)
+                 refetched.executive_summary, refetched.pipeline_state)
     assert before == after, "ideation must not mutate proposal fields"
 
 

@@ -107,13 +107,16 @@ def _build_ideation_system_prompt(proposal, context_brief: str | None = None) ->
         # ₹ formatting follows Indian numbering grouping (1,00,000 = 1 lakh).
         parts.append(f"\n**Cost model:** Total ₹{_inr(total)}, {items} line items.")
 
-    if proposal.covering_letter:
+    # cover_page and executive_summary are now section dicts ({content, assets, included, metadata})
+    cover_page = getattr(proposal, "cover_page", None)
+    if cover_page and isinstance(cover_page, dict) and cover_page.get("content"):
         parts.append(
-            f"\n**Covering letter (current draft):**\n{_truncate(proposal.covering_letter, _LETTER_CHARS)}"
+            f"\n**Covering letter (current draft):**\n{_truncate(str(cover_page['content']), _LETTER_CHARS)}"
         )
-    if proposal.executive_summary:
+    exec_summary = getattr(proposal, "executive_summary", None)
+    if exec_summary and isinstance(exec_summary, dict) and exec_summary.get("content"):
         parts.append(
-            f"\n**Executive summary:**\n{_truncate(proposal.executive_summary, _SUMMARY_CHARS)}"
+            f"\n**Executive summary:**\n{_truncate(str(exec_summary['content']), _SUMMARY_CHARS)}"
         )
 
     if context_brief:

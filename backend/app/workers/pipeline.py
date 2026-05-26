@@ -96,12 +96,8 @@ async def build_cost_model(ctx: dict, proposal_id: str) -> None:
     await _run_phase(ctx, "build_cost_model", proposal_id)
 
 
-async def generate_narrative(ctx: dict, proposal_id: str) -> None:
-    await _run_phase(ctx, "generate_narrative", proposal_id)
-
-
-async def generate_outputs(ctx: dict, proposal_id: str) -> None:
-    await _run_phase(ctx, "generate_outputs", proposal_id)
+async def generate_sections(ctx: dict, proposal_id: str) -> None:
+    await _run_phase(ctx, "generate_sections", proposal_id)
 
 
 async def _run_ideation_phase(ctx: dict, proposal_id: str) -> None:
@@ -155,7 +151,7 @@ async def run_ideation(ctx: dict, proposal_id: str) -> None:
 class WorkerSettings:
     functions = [
         analyze_brief, run_research, run_benchmarks,
-        build_cost_model, generate_narrative, generate_outputs,
+        build_cost_model, generate_sections,
         run_ideation,
         enrich_context_from_emails,
     ]

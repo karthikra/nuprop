@@ -112,74 +112,36 @@ async def test_build_cost_model_commits_model_and_creates_message(db, make_propo
         assert any(m.message_type == "cost_model" for m in msgs)
 
 
-async def test_generate_narrative_commits_sections_and_advances_pipeline(db, monkeypatch, make_proposal_db):
-    from app.services.ai.narrative_generator import NarrativeGenerator
+async def test_generate_sections_populates_columns_and_advances_pipeline(db, monkeypatch, make_proposal_db):
+    """generate_sections writes section payloads to each column and advances
+    pipeline_state to section_editor."""
+    from app.services.ai import section_facts, section_synthesis
+    import app.services.pipeline_service as ps
 
     agency, _, proposal = await make_proposal_db(
         brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
-        pipeline_state={"current_phase": "narrative_generation", "phases_completed": ["research"]},
+        pipeline_state={"current_phase": "section_generation", "phases_completed": ["research"]},
     )
     pid = proposal.id
 
-    class _Narr:
-        covering_letter = "Dear Acme,"
-        covering_letter_alt = "Hi Acme,"
-        executive_summary = "Summary."
-        scope_sections = [{"title": "Logo", "body": "..."}]
-        cost_rationale = "Because."
-        terms = "Net 30."
-        letter_strategy_primary = "confident"
-        letter_strategy_alt = "warm"
+    async def _fake_fact(section_type, **_):
+        return {"content": f"FACT {section_type}", "assets": [], "included": True, "metadata": {}}
 
-    async def fake_generate_all(self, **kwargs):
-        return _Narr()
+    async def _fake_synth(section_type, **_):
+        return {"content": f"SYNTH {section_type}", "assets": [], "included": True, "metadata": {}}
 
-    monkeypatch.setattr(NarrativeGenerator, "generate_all", fake_generate_all)
+    monkeypatch.setattr(section_facts, "generate_fact_section", _fake_fact)
+    monkeypatch.setattr(section_synthesis, "generate_synthesis_section", _fake_synth)
+    monkeypatch.setattr(ps, "generate_fact_section", _fake_fact)
+    monkeypatch.setattr(ps, "generate_synthesis_section", _fake_synth)
+
     svc = PipelineService(db, AsyncMock())
-    await svc.generate_narrative(pid)
+    await svc.generate_sections(pid)
 
     from app.infrastructure.db.database import async_session_factory
     async with async_session_factory() as fresh:
         refetched = await ProposalRepository(fresh).get_by_id(pid)
-        assert refetched.covering_letter == "Dear Acme,"
-        assert refetched.executive_summary == "Summary."
-        assert refetched.pipeline_state["current_phase"] == "narrative_review"
-
-
-async def test_generate_outputs_commits_status_and_advances_to_complete(db, tmp_path, monkeypatch, make_proposal_db):
-    # OUTPUT_DIR is a @computed_field — patch get_settings() in the pipeline module
-    # to return a stub whose OUTPUT_DIR points at tmp_path so generated files land there.
-    from app.core.config import get_settings as real_get_settings
-
-    real_settings = real_get_settings()
-
-    class _StubSettings:
-        OUTPUT_DIR = str(tmp_path)
-
-        def __getattr__(self, name):  # delegate everything else to the real settings
-            return getattr(real_settings, name)
-
-    monkeypatch.setattr(
-        "app.services.pipeline_service.get_settings", lambda: _StubSettings()
-    )
-
-    agency, _, proposal = await make_proposal_db(
-        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
-        pipeline_state={"current_phase": "output_generation", "phases_completed": ["research", "narrative_review"]},
-    )
-    # give the proposal narrative content so generation has something to render
-    await ProposalRepository(db).update(
-        proposal.id, covering_letter="Dear Acme,", executive_summary="Summary.",
-        scope_sections=[], terms="Net 30.",
-    )
-    await db.commit()
-    pid = proposal.id
-
-    svc = PipelineService(db, AsyncMock())
-    await svc.generate_outputs(pid)
-
-    from app.infrastructure.db.database import async_session_factory
-    async with async_session_factory() as fresh:
-        refetched = await ProposalRepository(fresh).get_by_id(pid)
-        assert refetched.pipeline_state["current_phase"] == "complete"
-        assert refetched.status == "review"
+        # executive_summary is a synthesis section — content should be populated
+        assert refetched.executive_summary is not None
+        assert refetched.executive_summary["content"] == "SYNTH executive_summary"
+        assert refetched.pipeline_state["current_phase"] == "section_editor"
