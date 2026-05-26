@@ -14,7 +14,7 @@ def _proposal(**overrides):
         research=None,
         benchmarks=None,
         cost_model=None,
-        covering_letter=None,
+        cover_page=None,
         executive_summary=None,
         pipeline_state={"current_phase": "brief"},
     )
@@ -39,8 +39,8 @@ def test_full_proposal_includes_each_known_section():
         research="## Pepsi Global research\nLong paragraph " + "x" * 5000,
         benchmarks="## Benchmarks\nLong paragraph " + "y" * 3000,
         cost_model={"grand_total": 1480000, "line_items": [{}] * 6},
-        covering_letter="Dear Pepsi team," + " z" * 2000,
-        executive_summary="Summary " + " w" * 2000,
+        cover_page={"content": "Dear Pepsi team," + " z" * 2000, "assets": [], "included": True, "metadata": {}},
+        executive_summary={"content": "Summary " + " w" * 2000, "assets": [], "included": True, "metadata": {}},
         pipeline_state={"current_phase": "narrative_review"},
     )
     prompt = _build_ideation_system_prompt(p)

@@ -134,8 +134,8 @@ async def test_run_ideation_includes_context_brief_in_system_prompt(
 
 
 @pytest.mark.asyncio
-async def test_generate_narrative_passes_context_brief(make_proposal_db, db, monkeypatch):
-    """generate_narrative threads context_brief into NarrativeGenerator.generate_all."""
+async def test_generate_sections_passes_context_brief(make_proposal_db, db, monkeypatch):
+    """generate_sections threads context_brief into each section generator call."""
     agency, client, proposal = await make_proposal_db(brief={"client": {"name": "Acme"}})
     from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
     await ProposalRepository(db).update(
@@ -143,25 +143,28 @@ async def test_generate_narrative_passes_context_brief(make_proposal_db, db, mon
     )
     await db.commit()
 
-    captured = {}
+    captured_context_briefs: list[str | None] = []
 
-    async def fake_generate_all(self, **kwargs):
-        captured.update(kwargs)
-        from app.services.ai.narrative_generator import NarrativeResult
-        return NarrativeResult(
-            covering_letter="", covering_letter_alt="",
-            letter_strategy_primary="confident", letter_strategy_alt="warm",
-            executive_summary="",
-            scope_sections=[], cost_rationale="", terms="",
-        )
+    async def fake_fact(section_type, context_brief=None, **_):
+        captured_context_briefs.append(context_brief)
+        return {"content": "x", "assets": [], "included": True, "metadata": {}}
 
-    monkeypatch.setattr(
-        "app.services.ai.narrative_generator.NarrativeGenerator.generate_all", fake_generate_all
-    )
+    async def fake_synth(section_type, context_brief=None, **_):
+        captured_context_briefs.append(context_brief)
+        return {"content": "x", "assets": [], "included": True, "metadata": {}}
+
+    from app.services.ai import section_facts, section_synthesis
+    import app.services.pipeline_service as ps
+    monkeypatch.setattr(section_facts, "generate_fact_section", fake_fact)
+    monkeypatch.setattr(section_synthesis, "generate_synthesis_section", fake_synth)
+    monkeypatch.setattr(ps, "generate_fact_section", fake_fact)
+    monkeypatch.setattr(ps, "generate_synthesis_section", fake_synth)
 
     from app.services.pipeline_service import PipelineService
     from unittest.mock import AsyncMock
     svc = PipelineService(db, AsyncMock())
-    await svc.generate_narrative(proposal.id)
+    await svc.generate_sections(proposal.id)
 
-    assert captured.get("context_brief") == "ACME CONTEXT BRIEF"
+    assert any(cb == "ACME CONTEXT BRIEF" for cb in captured_context_briefs), (
+        f"context_brief was not passed to any section generator; got: {captured_context_briefs}"
+    )
