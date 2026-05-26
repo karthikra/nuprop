@@ -56,7 +56,7 @@ S9–S13 reshapes the output around **nine canonical proposal sections**, each i
 
 ### Piece A — The 9-section schema
 
-`Proposal.sections: list[Section] | None` (new JSON column). When NULL, the proposal hasn't reached the section-generation phase yet — pre-S9 proposals stay NULL forever (see Migration).
+**One JSON column per section type** on `Proposal` — nine new nullable columns named after the canonical section types. Each column stores the full section payload (content + assets + included flag + metadata), not just text. When a column is NULL the section hasn't been generated yet; when its `included` is false the user has toggled it off. Order is not stored in the row — it's the fixed canonical sequence in code (`SECTION_ORDER`).
 
 ```python
 class SectionType(str, enum.Enum):
@@ -297,17 +297,26 @@ UI:
 
 ## Migration strategy
 
-**Schema migration `05_proposal_sections_and_share_token`:**
+**Schema migration `05_proposal_section_columns` (S9):**
 
-- Add `proposals.sections: JSON nullable`.
-- Add `proposals.share_token: VARCHAR(64) nullable, unique`.
 - Drop `proposals.covering_letter`.
 - Drop `proposals.covering_letter_alt`.
-- Drop `proposals.executive_summary`.
+- Drop `proposals.executive_summary` (Text — re-added below as JSON).
 - Drop `proposals.scope_sections`.
 - Drop `proposals.cost_rationale`.
 - Drop `proposals.terms`.
 - Drop `proposals.email_draft`.
+- Add `proposals.cover_page: JSON nullable`.
+- Add `proposals.executive_summary: JSON nullable`.
+- Add `proposals.problem_statement: JSON nullable`.
+- Add `proposals.proposed_solution: JSON nullable`.
+- Add `proposals.scope_of_work: JSON nullable`.
+- Add `proposals.timeline: JSON nullable`.
+- Add `proposals.pricing: JSON nullable`.
+- Add `proposals.qualifications: JSON nullable`.
+- Add `proposals.terms_and_conditions: JSON nullable`.
+
+**`share_token` and the `published_at` column are deferred to S12's migration** (`06_proposal_share_token`). S9 keeps proposals in the existing `editing`/`review` states.
 
 **Existing-proposal handling:**
 
