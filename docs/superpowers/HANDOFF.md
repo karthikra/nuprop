@@ -1,12 +1,13 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-24 (S8 smart rate card shipped + deployed)
-**Latest commit on `main`:** `9a12a30` (S8 merge commit). Pushed; auto-deploy run triggered.
-**Working tree:** clean. On `main`. In sync with `origin/main`.
+**Last updated:** 2026-05-26 (S9 section schema + editor shipped, not yet merged to main)
+**Latest commit on `main`:** `6c4702d`. S9 lives on branch `worktree-s9-section-schema-and-editor` pending merge.
+**Working tree:** clean inside the S9 worktree. `main` is still in sync with `origin/main`.
 **Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of this session the proposal pipeline now consumes client context (S5 — backend, not directly visible in the UI).
 
 **M16-M20 roadmap status:** S1–S7 COMPLETE. All M16-M20 work — backend + frontend — is fully shipped.
 **Post-roadmap slices:** S8 (smart rate card) COMPLETE — see "What happened this session" below.
+S9 (section schema + two-pass generation + editor) COMPLETE — see "What happened this session" below.
 
 ---
 
@@ -81,6 +82,38 @@ Check for leftover worktrees from this session: `git worktree list`. If `s5-pipe
 - **`sync_emails` is fine** — its 401→400 fix already shipped 2026-05-21.
 - **`pricing_model`** — S5 carries it in the merged config but `CostModelBuilder` doesn't branch on it (no alternative pricing path exists). If you want it to actually do something, that's a fresh design conversation: *what is the alternative pricing model?*
 - Other future-work items are listed in each slice's spec under "Future work".
+
+---
+
+## What happened this session (2026-05-26 — S9)
+
+Shipped **S9 — section schema + two-pass LLM generation + long-form editor**, the first slice of the S9–S13 section-redesign roadmap.
+
+### Architecture
+
+- **Schema:** 7 legacy text columns dropped (`covering_letter`, `covering_letter_alt`, `executive_summary`-as-Text, `scope_sections`, `cost_rationale`, `terms`, `email_draft`); 9 new JSON columns added — one per canonical section type. Each column carries `{content, assets, included, metadata}`. Migration `05_proposal_section_columns`.
+- **Two-pass generation:** `PipelineService.generate_sections` replaces the old `generate_narrative` and `generate_outputs` phases. Pass 1 runs 7 fact generators in parallel via `asyncio.gather`; Pass 2 runs 2 synthesis generators sequentially with Pass-1 outputs in the prompt. All section generators live in `app/services/ai/section_facts.py` and `section_synthesis.py`.
+- **Approval flow:** the narrative gate is removed. Cost-model approval enqueues `generate_sections` directly. After generation completes the pipeline transitions to `section_editor` and the frontend surfaces the editor.
+- **Section CRUD:** `PATCH /proposals/{id}/sections/{type}` (content / included / metadata), `POST /sections/{type}/regenerate` (fresh LLM variant), `POST /sections/{type}/refine` (instruction-steered rewrite).
+- **Frontend:** new `components/sections/section-editor.tsx` renders included sections in canonical order. Each section is a `section-block.tsx` with auto-save (1s debounce), regenerate, refine-with-prompt, and toggle-off. No media yet (S10 unlocks images, S11 unlocks video + audio). The narrative-preview chat card was removed.
+
+### Test counts
+
+- Backend: 376 → **~406** (+~30 across section helpers, fact/synthesis generators, the `generate_sections` phase, the cost-model gate change, the section CRUD endpoints, plus updated legacy tests).
+- Frontend: 260 → **265** (+5 for the section-block component).
+- Migration head: `05_proposal_section_columns`.
+
+### Non-goals carried forward to S10–S13
+
+- Media (image / video / audio): S10 + S11.
+- NUSTAGE export + share token + Publish: S12.
+- Context UX (persistent chip + Gmail picker): S13.
+- CTA / Appendices section types: deferred entirely.
+- DOCX / PDF: removed in S9; returns as downloadable artifacts in S12.
+
+### Notable cleanup also landed
+
+- `app/services/ideation_service.py` updated to read from the new section dicts (`cover_page`, `executive_summary`) instead of the dropped legacy text columns — required to keep the ideation side-channel functional after the schema migration.
 
 ---
 
