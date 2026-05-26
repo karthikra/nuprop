@@ -8,6 +8,7 @@ touches a request-scoped session.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from uuid import UUID
@@ -17,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.domain.schemas.chat_schemas import ChatMessageResponse
+from app.infrastructure.db.models.agency import Agency
 from app.infrastructure.db.models.chat_message import MessageRole, MessageType
 from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
@@ -25,12 +27,19 @@ from app.infrastructure.db.repositories.rate_card_repo import RateCardRepository
 from app.services.ai.benchmark_agent import BenchmarkAgent
 from app.services.ai.brief_analyzer import BriefAnalyzer
 from app.services.ai.cost_model_builder import CostModelBuilder
-from app.services.ai.narrative_generator import NarrativeGenerator
 from app.services.ai.rate_gap_analyzer import analyze_gaps
 from app.services.ai.research_agent import RESEARCH_SYSTEM, ResearchAgent
+from app.services.ai.section_facts import generate_fact_section
+from app.services.ai.section_synthesis import generate_synthesis_section
 from app.services.llm import Tier, get_ai_service
 from app.services.research_planner import generate_benchmarks_plan, generate_research_plan
 from app.services.research_streaming import ActivityFlusher, process_stream
+from app.services.sections import (
+    FACT_SECTIONS,
+    SECTION_ORDER,
+    SYNTHESIS_SECTIONS,
+    default_sections_for_template,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -423,255 +432,73 @@ class PipelineService:
         await self._emit_progress(proposal_id, "cost_model", "complete", "Cost model ready for review")
         await self._emit_message(proposal_id, msg)
 
-    async def generate_narrative(self, proposal_id: UUID | str) -> None:
-        """Generate all narrative sections.
-
-        Extraction of ChatViewModel._generate_narrative — agency/rate-card loads
-        kept inline because they were inline in the source; template config goes
-        through _load_template_config + _merge_preferences_into_config.
-        """
-        from app.infrastructure.db.models.agency import Agency
-        from app.infrastructure.db.models.rate_card import RateCard
-
+    async def generate_sections(self, proposal_id: UUID | str) -> None:
+        """Pass-1 facts (parallel) + Pass-2 synthesis (sequential). Writes each
+        section's payload to its dedicated column on the proposal."""
         proposal = await self.proposal_repo.get_by_id(proposal_id)
         if proposal is None:
+            logger.warning("generate_sections: proposal %s not found", proposal_id)
             return
 
-        result = await self.session.execute(
-            select(Agency).where(Agency.id == str(proposal.agency_id))
+        agency_row = await self.session.execute(
+            select(Agency).where(Agency.id == proposal.agency_id)
         )
-        agency = result.scalar_one_or_none()
+        agency = agency_row.scalar_one()
+        agency_name = agency.name
 
         template_config = await self._load_template_config(proposal)
-
-        result = await self.session.execute(
-            select(RateCard)
-            .where(RateCard.agency_id == str(proposal.agency_id), RateCard.is_active == True)
-            .limit(1)
-        )
-        rate_card = result.scalar_one_or_none()
-
-        effective_config = self._merge_preferences_into_config(
-            template_config, proposal.preferences or {}
-        )
-
         context_brief = await self._load_context_brief(proposal)
+        default_sections = default_sections_for_template(template_config)
+
+        # ── Pass 1 — fact sections in parallel ────────────────────────────────
+        fact_targets = [s for s in FACT_SECTIONS if s in default_sections]
+
+        async def _one_fact(section_type: str) -> tuple[str, dict]:
+            payload = await generate_fact_section(
+                section_type=section_type,
+                brief=proposal.brief or {},
+                research=proposal.research,
+                cost_model=proposal.cost_model or {},
+                template_config=template_config,
+                context_brief=context_brief,
+                agency_name=agency_name,
+            )
+            return section_type, payload
 
         await self._emit_progress(
-            proposal_id, "narrative", "searching", "Writing covering letter (2 variants)..."
+            proposal_id, "sections", "running",
+            f"generating {len(fact_targets)} fact sections in parallel",
         )
+        fact_results = await asyncio.gather(*[_one_fact(s) for s in fact_targets])
+        pass1_sections: dict[str, dict] = dict(fact_results)
 
-        narr = await NarrativeGenerator().generate_all(
-            brief=proposal.brief,
-            research=proposal.research,
-            benchmarks=proposal.benchmarks,
-            cost_model=proposal.cost_model or {},
-            template_config=effective_config,
-            agency_name=agency.name if agency else "the agency",
-            agency_voice=agency.voice_profile if agency else None,
-            agency_default_terms=agency.default_terms if agency else None,
-            agency_payment_terms=agency.payment_terms if agency else None,
-            agency_gst_rate=agency.gst_rate if agency else 0.18,
-            rate_card_offerings=rate_card.offerings if rate_card else None,
-            standard_options=rate_card.standard_options if rate_card else 3,
-            standard_revisions=rate_card.standard_revisions if rate_card else 2,
-            context_brief=context_brief,
-        )
+        for section_type, payload in pass1_sections.items():
+            await self.proposal_repo.update(proposal_id, **{section_type: payload})
 
-        await self.proposal_repo.update(
-            proposal.id,
-            covering_letter=narr.covering_letter,
-            covering_letter_alt=narr.covering_letter_alt,
-            executive_summary=narr.executive_summary,
-            scope_sections=narr.scope_sections,
-            cost_rationale=narr.cost_rationale,
-            terms=narr.terms,
-        )
-
-        pipeline = proposal.pipeline_state.copy()
-        pipeline["phases_completed"] = pipeline.get("phases_completed", []) + ["narrative_generation"]
-        pipeline["current_phase"] = "narrative_review"
-        await self.proposal_repo.update(proposal.id, pipeline_state=pipeline)
-        await self.session.commit()                       # commit BEFORE broadcast
-
-        await self._emit_progress(proposal_id, "narrative", "complete", "Narrative ready for review")
-        await self._emit_phase_change(proposal_id, "narrative_review")
-
-        scope_count = len(narr.scope_sections)
-        content = (
-            f"**Proposal narrative ready for review.**\n\n"
-            f"I've written two covering letter variants ({narr.letter_strategy_primary} and {narr.letter_strategy_alt}), "
-            f"the executive summary, {scope_count} scope descriptions"
-            f"{', cost rationale,' if narr.cost_rationale else ''} and terms & conditions.\n\n"
-            f"Review each section below and approve when ready."
-        )
-        msg = await self.msg_repo.create(
-            proposal_id=proposal_id,
-            role=MessageRole.ASSISTANT.value,
-            message_type=MessageType.NARRATIVE_PREVIEW.value,
-            content=content,
-            extra_data={
-                "requires_approval": True,
-                "gate_type": "narrative",
-                "sections": {
-                    "covering_letter": narr.covering_letter,
-                    "covering_letter_alt": narr.covering_letter_alt,
-                    "letter_strategy_primary": narr.letter_strategy_primary,
-                    "letter_strategy_alt": narr.letter_strategy_alt,
-                    "executive_summary": narr.executive_summary,
-                    "scope_sections": narr.scope_sections,
-                    "cost_rationale": narr.cost_rationale,
-                    "terms": narr.terms,
-                },
-            },
-            phase="narrative_review",
-        )
-        await self.session.commit()
-        await self._emit_message(proposal_id, msg)
-
-    async def generate_outputs(self, proposal_id: UUID | str) -> None:
-        """Generate DOCX, print-ready HTML, email drafts, and interactive site.
-
-        Extraction of ChatViewModel._generate_outputs. The narrative extra_data
-        fallback branch from the source is dropped here — with per-phase commits,
-        proposal.covering_letter is always populated by the time this runs. (The
-        whole point of the fix.)
-        """
-        from app.infrastructure.db.models.agency import Agency
-        from app.services.document_generator import DocumentGenerator
-        from app.services.site_generator import SiteGenerator
-
-        proposal = await self.proposal_repo.get_by_id(proposal_id)
-        if proposal is None:
-            return
-
-        result = await self.session.execute(
-            select(Agency).where(Agency.id == str(proposal.agency_id))
-        )
-        agency = result.scalar_one_or_none()
-
-        prop_data = {
-            "project_name": proposal.project_name,
-            "brief": proposal.brief,
-            "cost_model": proposal.cost_model or {},
-            "covering_letter": proposal.covering_letter,
-            "covering_letter_alt": proposal.covering_letter_alt,
-            "executive_summary": proposal.executive_summary,
-            "scope_sections": proposal.scope_sections or [],
-            "cost_rationale": proposal.cost_rationale,
-            "terms": proposal.terms,
-        }
-
-        await self._emit_progress(proposal_id, "documents", "searching", "Generating DOCX...")
-        outputs = DocumentGenerator().generate_all(
-            proposal=prop_data,
-            agency_name=agency.name if agency else "Agency",
-            agency_colours=agency.colours if agency else None,
-        )
-
-        output_dir = Path(get_settings().OUTPUT_DIR) / str(proposal_id)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        files_generated: list[dict] = []
-
-        if outputs.docx_bytes:
-            docx_path = output_dir / "proposal.docx"
-            docx_path.write_bytes(outputs.docx_bytes)
-            await self.proposal_repo.update(proposal.id, docx_path=str(docx_path))
-            files_generated.append({"type": "docx", "filename": "proposal.docx", "size": len(outputs.docx_bytes)})
-
-        if outputs.pdf_bytes:
-            pdf_path = output_dir / "proposal.pdf"
-            pdf_path.write_bytes(outputs.pdf_bytes)
-            await self.proposal_repo.update(proposal.id, pdf_path=str(pdf_path))
-            files_generated.append({"type": "pdf", "filename": "proposal.pdf", "size": len(outputs.pdf_bytes)})
-
-        if outputs.pdf_html:
-            html_path = output_dir / "proposal-print.html"
-            html_path.write_text(outputs.pdf_html, encoding="utf-8")
-            files_generated.append({"type": "html", "filename": "proposal-print.html", "size": len(outputs.pdf_html)})
-
-        if outputs.email_confident:
-            email_path = output_dir / "email-drafts.md"
-            email_content = (
-                f"# Email Draft — Confident\n\n{outputs.email_confident}\n\n---\n\n"
-                f"# Email Draft — Warm\n\n{outputs.email_warm}"
-            )
-            email_path.write_text(email_content, encoding="utf-8")
-            files_generated.append({"type": "email", "filename": "email-drafts.md"})
-
-        await self._emit_progress(proposal_id, "documents", "complete", "Documents ready")
-
-        # Interactive proposal site — best-effort
-        await self._emit_progress(proposal_id, "site", "searching", "Generating interactive proposal site...")
-        try:
-            site_theme = "editorial"
-            template_config = await self._load_template_config(proposal)
-            if template_config:
-                site_theme = template_config.get("output", {}).get("site_theme", "editorial")
-
-            agency_dict = {
-                "name": agency.name if agency else "Agency",
-                "logo_url": agency.logo_url if agency else None,
-                "colours": agency.colours if agency else {},
-                "fonts": agency.fonts if agency else {},
-                "email": "",
-            }
-            site_html = SiteGenerator().generate(
-                proposal_data=prop_data,
-                agency=agency_dict,
-                theme=site_theme,
-                proposal_id=str(proposal_id),
-                tracking_endpoint="/api/v1/track",
-            )
-            site_dir = output_dir / "site"
-            site_dir.mkdir(parents=True, exist_ok=True)
-            (site_dir / "index.html").write_text(site_html, encoding="utf-8")
-
-            site_url = f"/p/{proposal_id}"
-            await self.proposal_repo.update(proposal.id, site_url=site_url)
-            files_generated.append({
-                "type": "site", "filename": "site/index.html",
-                "url": site_url, "theme": site_theme,
-            })
+        # ── Pass 2 — synthesis sections sequentially ──────────────────────────
+        synth_targets = [s for s in SYNTHESIS_SECTIONS if s in default_sections]
+        for section_type in synth_targets:
             await self._emit_progress(
-                proposal_id, "site", "complete", f"Proposal site ready ({site_theme} theme)"
+                proposal_id, "sections", "running", f"synthesising {section_type}",
             )
-        except Exception as e:  # noqa: BLE001 — site is best-effort
-            logger.exception("site generation failed")
-            await self._emit_progress(
-                proposal_id, "site", "error", f"Site generation failed: {str(e)[:100]}"
+            payload = await generate_synthesis_section(
+                section_type=section_type,
+                brief=proposal.brief or {},
+                pass1_sections=pass1_sections,
+                context_brief=context_brief,
+                agency_name=agency_name,
             )
+            await self.proposal_repo.update(proposal_id, **{section_type: payload})
 
-        # Advance pipeline to complete
-        pipeline = proposal.pipeline_state.copy()
-        pipeline["phases_completed"] = pipeline.get("phases_completed", []) + ["output_generation"]
-        pipeline["current_phase"] = "complete"
-        await self.proposal_repo.update(proposal.id, pipeline_state=pipeline, status="review")
-        await self.session.commit()                       # commit BEFORE broadcast
-
-        await self._emit_phase_change(proposal_id, "complete")
-
-        file_list = "\n".join(f"- **{f['type'].upper()}**: {f['filename']}" for f in files_generated)
-        content = (
-            f"**All outputs generated.**\n\n"
-            f"{file_list}\n\n"
-            f"Download your files below. The proposal is ready to send."
-        )
-        msg = await self.msg_repo.create(
-            proposal_id=proposal_id,
-            role=MessageRole.ASSISTANT.value,
-            message_type=MessageType.OUTPUT_READY.value,
-            content=content,
-            extra_data={
-                "files": files_generated,
-                "email_confident": outputs.email_confident,
-                "email_warm": outputs.email_warm,
-            },
-            phase="complete",
-        )
         await self.session.commit()
-        await self._emit_message(proposal_id, msg)
+
+        pipeline = (proposal.pipeline_state or {}).copy()
+        pipeline["current_phase"] = "section_editor"
+        pipeline["phases_completed"] = pipeline.get("phases_completed", []) + ["sections"]
+        await self.proposal_repo.update(proposal_id, pipeline_state=pipeline)
+        await self.session.commit()
+
+        await self._emit_phase_change(proposal_id, "section_editor")
 
     @staticmethod
     def _merge_preferences_into_config(template_config: dict | None, preferences: dict) -> dict:
