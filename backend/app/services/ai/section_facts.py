@@ -186,10 +186,16 @@ async def generate_fact_section(
     template_config: dict | None,
     context_brief: str | None,
     agency_name: str,
+    refine_instructions: str | None = None,
 ) -> dict:
     """Generate one fact section and return its payload dict."""
     builder = PROMPT_BUILDERS[section_type]
     user_prompt = builder.user_template(brief, research, cost_model, context_brief, agency_name)
+    if refine_instructions:
+        user_prompt += (
+            "\n\nREFINEMENT INSTRUCTIONS (the user wants the section adjusted): "
+            + refine_instructions
+        )
 
     result = await get_ai_service().complete(
         prompt=user_prompt,
