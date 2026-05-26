@@ -366,7 +366,13 @@ async def _generate_section(
             refine_instructions=refine_instructions,
         )
     # Synthesis section — rebuild pass1_sections dict from current proposal columns.
-    pass1_sections = {s: getattr(proposal, s) or {} for s in FACT_SECTIONS}
+    # Include executive_summary AND fact sections (everything except the section being
+    # regenerated, to avoid stale self-reference).
+    pass1_sections = {
+        s: getattr(proposal, s) or {}
+        for s in SECTION_ORDER
+        if s != section_type
+    }
     return await generate_synthesis_section(
         section_type=section_type,
         brief=proposal.brief or {},

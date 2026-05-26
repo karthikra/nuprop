@@ -489,6 +489,7 @@ class PipelineService:
                 agency_name=agency_name,
             )
             await self.proposal_repo.update(proposal_id, **{section_type: payload})
+            pass1_sections[section_type] = payload   # make this section visible to later synthesis sections
 
         await self.session.commit()
 
