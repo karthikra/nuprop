@@ -361,7 +361,7 @@ async def patch_section(
 
     await repo.update(proposal_id, **{section_type: updated})
     await db.commit()
-    return updated
+    return resign_assets(updated, signer=_s3.generate_presigned_get) or updated
 
 
 @router.post("/{proposal_id}/sections/{section_type}/regenerate", status_code=200)
@@ -378,9 +378,12 @@ async def regenerate_section(
         raise HTTPException(status_code=404, detail="Proposal not found")
 
     new_payload = await _generate_section(proposal, section_type, refine_instructions=None, db=db)
+    # Preserve user-uploaded / AI-generated assets across regeneration.
+    current = getattr(proposal, section_type) or {}
+    new_payload["assets"] = current.get("assets", [])
     await repo.update(proposal_id, **{section_type: new_payload})
     await db.commit()
-    return new_payload
+    return resign_assets(new_payload, signer=_s3.generate_presigned_get) or new_payload
 
 
 @router.post("/{proposal_id}/sections/{section_type}/refine", status_code=200)
@@ -400,9 +403,12 @@ async def refine_section(
     new_payload = await _generate_section(
         proposal, section_type, refine_instructions=body.instructions, db=db,
     )
+    # Preserve user-uploaded / AI-generated assets across refinement.
+    current = getattr(proposal, section_type) or {}
+    new_payload["assets"] = current.get("assets", [])
     await repo.update(proposal_id, **{section_type: new_payload})
     await db.commit()
-    return new_payload
+    return resign_assets(new_payload, signer=_s3.generate_presigned_get) or new_payload
 
 
 # ── Section asset endpoints (S10: image only; S11 widens kind) ───────────────
@@ -420,6 +426,11 @@ async def presign_asset(
     db: AsyncSession = Depends(get_db),
 ):
     _validate_section_type(section_type)
+    if body.kind != "image":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Upload for kind={body.kind!r} is not supported yet (S10 ships image only)",
+        )
     repo = ProposalRepository(db)
     proposal = await _resolve_proposal(repo, proposal_id, agency_id)
 
@@ -456,6 +467,11 @@ async def commit_asset(
     db: AsyncSession = Depends(get_db),
 ):
     _validate_section_type(section_type)
+    if body.kind != "image":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Commit for kind={body.kind!r} is not supported yet (S10 ships image only)",
+        )
     repo = ProposalRepository(db)
     proposal = await _resolve_proposal(repo, proposal_id, agency_id)
 
@@ -533,8 +549,11 @@ async def generate_asset(
         )
     except RuntimeError as e:
         raise HTTPException(status_code=502, detail=f"Image generation failed: {e}") from e
+    # Strip the transient signed URL before persisting — it'd expire in 1h
+    # and the GET path re-signs on every read.
+    asset_to_persist = {**asset, "url": None}
     current = getattr(proposal, section_type)
-    new_section = append_asset_to_section(current, asset)
+    new_section = append_asset_to_section(current, asset_to_persist)
     await repo.update(proposal_id, **{section_type: new_section})
     await db.commit()
     return _resign_asset(asset)

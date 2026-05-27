@@ -104,7 +104,7 @@ Shipped **S10 — image media (upload + Nano Banana generation)**, the second sl
 
 ### Test counts
 
-- Backend: `406 → 458` (+10 media-common base + 13 media-common hardening tests, +7 section-assets, +4 image-gen, +11 asset endpoints initial + 5 follow-up review tests, +1 re-sign-on-GET, +1 missing-section delete, +1 fal-502 translation).
+- Backend: `406 → 463` (+11 media-common base + 13 media-common hardening, +7 section-assets, +4 image-gen, +12 asset endpoints initial + 5 review follow-ups, +1 re-sign-on-GET, +5 final-review fixes: 2 regen/refine asset-preserve regressions + 1 transient-url-not-persisted + 2 kind=image-only enforcement).
 - Frontend: `265 → 275` (+5 asset-row, +3 add-image-menu, +2 section-block integration).
 - Migration head: `05_proposal_section_columns` (no schema change in S10).
 

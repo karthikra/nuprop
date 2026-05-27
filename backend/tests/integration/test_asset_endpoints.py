@@ -323,7 +323,12 @@ async def test_commit_rejects_s3_key_outside_proposal_prefix(client, _proposal):
 
 
 async def test_commit_rejects_kind_mismatch_with_content_type(client, _proposal):
-    """Cannot commit kind=video with content_type=image/png."""
+    """Cannot commit kind=image with content_type=video/mp4 (mismatch).
+
+    Note: in S10 the endpoint short-circuits on kind!="image" with an
+    "image only" 400. To exercise the kind/content-type consistency check
+    that lives further down, we hold kind=image and lie about content_type.
+    """
     proposal, headers = _proposal
     r1 = await client.post(
         f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/presign",
@@ -337,8 +342,8 @@ async def test_commit_rejects_kind_mismatch_with_content_type(client, _proposal)
         json={
             "asset_id": p["asset_id"],
             "s3_key": p["s3_key"],
-            "kind": "video",
-            "content_type": "image/png",
+            "kind": "image",
+            "content_type": "video/mp4",
             "caption": None,
             "width": None,
             "height": None,
@@ -430,3 +435,137 @@ async def test_get_proposal_resigns_every_asset_url(client, _proposal, db):
     assets = body["problem_statement"]["assets"]
     assert assets[0]["url"] == "https://s3.example/k1?signed=test"
     assert assets[1]["url"] == "https://s3.example/k2?signed=test"
+
+
+# ── Regression: regenerate/refine must preserve assets ───────────────────────
+
+
+async def test_regenerate_section_preserves_existing_assets(client, _proposal, db, monkeypatch):
+    """Regenerating a section must NOT wipe its assets (Critical data-loss fix)."""
+    proposal, headers = _proposal
+    # Seed an asset directly on the section.
+    await ProposalRepository(db).update(
+        proposal.id,
+        problem_statement={
+            "content": "before",
+            "assets": [{"id": "a1", "kind": "image", "s3_key": "k1"}],
+            "included": True,
+            "metadata": {},
+        },
+    )
+    await db.commit()
+
+    # Mock the fact generator so regenerate returns a clean payload with empty assets.
+    async def _fake_fact(section_type, **_):
+        return {"content": "after", "assets": [], "included": True, "metadata": {}}
+
+    from app.services.ai import section_facts
+    monkeypatch.setattr(section_facts, "generate_fact_section", _fake_fact)
+    import app.views.v1.proposals as proposals_view
+    monkeypatch.setattr(proposals_view, "generate_fact_section", _fake_fact, raising=False)
+
+    r = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/regenerate",
+        headers=headers,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["content"] == "after"
+    # The asset must survive.
+    assert len(body["assets"]) == 1
+    assert body["assets"][0]["id"] == "a1"
+
+
+async def test_refine_section_preserves_existing_assets(client, _proposal, db, monkeypatch):
+    """Refining a section must NOT wipe its assets (Critical data-loss fix)."""
+    proposal, headers = _proposal
+    await ProposalRepository(db).update(
+        proposal.id,
+        problem_statement={
+            "content": "before",
+            "assets": [{"id": "a1", "kind": "image", "s3_key": "k1"}],
+            "included": True,
+            "metadata": {},
+        },
+    )
+    await db.commit()
+
+    async def _fake_fact(section_type, **_):
+        return {"content": "refined", "assets": [], "included": True, "metadata": {}}
+
+    from app.services.ai import section_facts
+    monkeypatch.setattr(section_facts, "generate_fact_section", _fake_fact)
+    import app.views.v1.proposals as proposals_view
+    monkeypatch.setattr(proposals_view, "generate_fact_section", _fake_fact, raising=False)
+
+    r = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/refine",
+        headers=headers,
+        json={"instructions": "shorter please"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["content"] == "refined"
+    assert len(body["assets"]) == 1
+
+
+async def test_generate_does_not_persist_transient_url(client, _proposal, db, monkeypatch):
+    """The signed url returned by generate_image must NOT be stored verbatim
+    in the JSON column — it'd expire in 1h. Persist with url=None; the GET
+    re-sign path restores the URL on read."""
+    proposal, headers = _proposal
+
+    async def _fake_generate_image(*, prompt, agency_id, proposal_id):
+        return {
+            "id": "ai-1", "kind": "image",
+            "s3_key": f"{agency_id}/{proposal_id}/ai-1.png",
+            "url": "https://transient.example/will-expire",
+            "caption": None, "ai_generated": True, "prompt": prompt,
+            "provider": "fal-ai/nano-banana",
+            "width": 1024, "height": 1024,
+            "duration_s": None, "poster_s3_key": None,
+        }
+
+    import app.views.v1.proposals as proposals_view
+    monkeypatch.setattr(proposals_view, "generate_image", _fake_generate_image, raising=False)
+
+    r = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/generate",
+        headers=headers,
+        json={"kind": "image", "prompt": "x"},
+    )
+    assert r.status_code == 200
+
+    # Open a fresh session so we see what was actually persisted (test fixture
+    # session has identity-map cache).
+    from app.infrastructure.db.database import async_session_factory
+    async with async_session_factory() as fresh:
+        refreshed = await ProposalRepository(fresh).get_by_id(proposal.id)
+    persisted = refreshed.problem_statement["assets"][0]
+    # Transient URL must NOT have leaked into the DB.
+    assert persisted.get("url") is None
+
+
+async def test_presign_rejects_non_image_kind_in_s10(client, _proposal):
+    proposal, headers = _proposal
+    r = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/presign",
+        headers=headers,
+        json={"kind": "video", "filename": "v.mp4", "content_type": "video/mp4", "size": 1024},
+    )
+    assert r.status_code == 400
+    assert "image only" in r.json()["detail"]
+
+
+async def test_commit_rejects_non_image_kind_in_s10(client, _proposal):
+    proposal, headers = _proposal
+    r = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/commit",
+        headers=headers,
+        json={
+            "asset_id": "a", "s3_key": "x/y/a.mp4", "kind": "video",
+            "content_type": "video/mp4", "caption": None, "width": None, "height": None,
+        },
+    )
+    assert r.status_code == 400
+    assert "image only" in r.json()["detail"]
