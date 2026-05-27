@@ -1,7 +1,7 @@
 # NUPROP Session Handoff
 
 **Last updated:** 2026-05-27 (S10 image media shipped)
-**Latest commit on `main`:** `<merge commit>` (S10 merge). Pushed; auto-deploy run triggered.
+**Latest commit on `main`:** `68f3c3d` (S10 merge). Pushed; auto-deploy run triggered.
 **Working tree:** clean. On `main`. In sync with `origin/main`.
 **Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of this session the proposal pipeline now consumes client context (S5 — backend, not directly visible in the UI).
 
