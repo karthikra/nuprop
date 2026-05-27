@@ -1,9 +1,9 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-27 (S10 image media shipped)
-**Latest commit on `main`:** `68f3c3d` (S10 merge). Pushed; auto-deploy run triggered.
+**Last updated:** 2026-05-27 (S10 image media shipped + Redis migrated off Upstash)
+**Latest commit on `main`:** `68f3c3d` (S10 merge). Pushed; auto-deploy triggered. Post-merge: Redis self-hosting on Fly + HANDOFF tidy commits on top — see "Post-S10 ops" below.
 **Working tree:** clean. On `main`. In sync with `origin/main`.
-**Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of this session the proposal pipeline now consumes client context (S5 — backend, not directly visible in the UI).
+**Production:** **LIVE at https://nuprop.fly.dev** — health 200, 14 secrets deployed (FAL_KEY added S10). Redis is **self-hosted** on Fly (app `nuprop-redis` in `bom`, internal-only at `redis://nuprop-redis.internal:6379/0`); Upstash has been retired. S3 asset bucket `nuprop-proposal-assets` is live in `ap-northeast-1`. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of S5 the proposal pipeline consumes client context.
 
 **M16-M20 roadmap status:** S1–S7 COMPLETE. All M16-M20 work — backend + frontend — is fully shipped.
 **Post-roadmap slices:** S8 (smart rate card) COMPLETE — see "What happened this session" below.
@@ -123,9 +123,52 @@ Shipped **S10 — image media (upload + Nano Banana generation)**, the second sl
 
 ### Operator steps needed before merge
 
-1. **Provision the bucket:** `AWS_PROFILE=nuprop bash backend/scripts/bootstrap_s3.sh` (idempotent; head-check first). Run from a workstation with IAM creds that can `s3:CreateBucket`, `s3:PutBucketCors`, `s3:PutBucketPublicAccessBlock`, `s3:PutLifecycleConfiguration`.
-2. **Push `FAL_KEY` to Fly:** `fly secrets set -a nuprop FAL_KEY="<key>"`. Get the key from https://fal.ai/dashboard. The app boots without it but `/generate` will 502 until the secret is set.
+1. **Provision the bucket:** `AWS_PROFILE=nuprop bash backend/scripts/bootstrap_s3.sh` (idempotent; head-check first). Run from a workstation with IAM creds that can `s3:CreateBucket`, `s3:PutBucketCors`, `s3:PutBucketPublicAccessBlock`, `s3:PutLifecycleConfiguration`. ✅ **Done 2026-05-27.**
+2. **Push `FAL_KEY` to Fly:** `fly secrets set -a nuprop FAL_KEY="<key>"`. Get the key from https://fal.ai/dashboard. The app boots without it but `/generate` will 502 until the secret is set. ✅ **Done 2026-05-27.**
 3. **Verify the bucket region matches `AWS_REGION` (`ap-northeast-1`)** — Fly's app pool needs IAM creds with `s3:PutObject` / `s3:GetObject` / `s3:DeleteObject` on `arn:aws:s3:::nuprop-proposal-assets/*`. If not, attach a minimal policy.
+
+---
+
+## Post-S10 ops — Redis migrated off Upstash (2026-05-27)
+
+After S10 merged, two ops issues surfaced during the smoke test and got resolved:
+
+### 1. Upstash Redis quota hit; migrated to self-hosted Fly Redis
+
+**Symptom:** Chat appeared stuck. Worker process was actually crash-looping with `redis.exceptions.ResponseError: max requests limit exceeded. Limit: 500000, Usage: 500000`. The Upstash free-tier quota was fully consumed (combination of normal traffic + crash-loop reconnect spam, accumulated over weeks).
+
+**Resolution:** Migrated to a self-hosted Redis on Fly via `backend/scripts/migrate_redis_to_self_hosted.sh`:
+
+- New Fly app `nuprop-redis` running `redis:7-alpine` in `bom`, single shared-cpu-1x machine, 256MB RAM, 1GB persistent volume mounted at `/data` for AOF.
+- Reachable only on Fly's private 6PN at `nuprop-redis.internal:6379` — never exposed publicly.
+- `nuprop`'s `REDIS_URL` rotated to `redis://nuprop-redis.internal:6379/0`.
+- Zero recurring vendor cost; runs under Fly's existing resource allowance.
+
+**Verify in prod:** `fly logs -a nuprop | grep -iE 'redis|max requests'` — should be silent on errors. ARQ doesn't log "connected" at INFO level, so the proof is the absence of failures + chat actually completing pipeline phases.
+
+**Rollback path (if needed):** Re-set `REDIS_URL` to the old Upstash URL (retrieve from Upstash dashboard — Fly doesn't reveal secret values), then `fly machine start <stopped-worker-id> -a nuprop`.
+
+**Once verified working for ~24h:** cancel the Upstash subscription in their dashboard and delete the `positive-man-126512` database.
+
+### 2. Fly bug: worker process doesn't auto-restart after secret changes
+
+**Symptom:** After ANY `fly secrets set -a nuprop`, the `worker` process group transitions to `stopped` and Fly does NOT bring it back. The `app` process group has `min_machines_running = 1` in `fly.toml` so it survives; the worker has no equivalent guarantee and no HTTP service to wake it. Chat appears stuck because ARQ jobs queue with no consumer.
+
+**Workaround:** After any secret change, run:
+
+```bash
+fly machine list -a nuprop --json \
+  | jq -r '.[] | select(.config.metadata.fly_process_group == "worker" and .state == "stopped") | .id' \
+  | xargs -r -I{} fly machine start {} -a nuprop
+```
+
+The `migrate_redis_to_self_hosted.sh` script does this automatically as step 6. The `bootstrap_s3.sh` script does NOT (no secret change). Any manual `fly secrets set …` invocation needs this snippet run immediately after.
+
+**Permanent fix (not yet shipped):** Add a post-deploy step to `.github/workflows/deploy.yml` that ensures the worker process group is up. Half-day follow-up.
+
+### 3. Secondary observation — standby worker came online
+
+The Fly secret rotation brought the standby worker `865139be669de8` to `started` state alongside the primary. ARQ handles concurrent workers safely (Redis-backed per-job atomic claim), but it's mildly wasteful. Optional cleanup: `fly machine stop 865139be669de8 -a nuprop`. Not blocking — both workers polling the same queue is benign.
 
 ---
 
