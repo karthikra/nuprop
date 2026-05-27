@@ -31,6 +31,7 @@ from app.services.ai.rate_gap_analyzer import analyze_gaps
 from app.services.ai.research_agent import RESEARCH_SYSTEM, ResearchAgent
 from app.services.ai.section_facts import generate_fact_section
 from app.services.ai.section_synthesis import generate_synthesis_section
+from app.services.ai.web_search_loop import synthesize_research
 from app.services.llm import Tier, get_ai_service
 from app.services.research_planner import generate_benchmarks_plan, generate_research_plan
 from app.services.research_streaming import ActivityFlusher, process_stream
@@ -231,33 +232,30 @@ class PipelineService:
             template_section="",  # template-queries path not wired in this orchestration; v2.
         )
 
-        ai = get_ai_service()
+        # 4. Search via Serper + synthesize via Sonnet 4.6.
+        #
+        # Anthropic's hosted web_search tool is not exposed on AWS Bedrock
+        # in ap-northeast-1 (see HANDOFF § 5e + docs/superpowers/specs/
+        # bedrock-web-search-fix.md Option 2). Instead we run the planner's
+        # queries through our Serper-backed WebSearchClient and feed the
+        # results into a single synthesis LLM call.
         try:
-            # NOTE: Anthropic's hosted web_search tool (type: web_search_20250305)
-            # is not available on AWS Bedrock in ap-northeast-1 — Bedrock returns
-            # 400 listing only bash/custom/memory/text_editor/tool_search as
-            # accepted tool types. Without tools, the model writes research from
-            # its training-data knowledge — no live web data, no citations.
-            # Honest about the limitation in the activity log; revisit when
-            # either (a) Bedrock exposes web_search, or (b) we wire up Serper
-            # as a custom tool with proper tool-use loop. See HANDOFF § 5e.
-            async with ai.client.messages.stream(
-                model=ai.model_for(Tier.BALANCED),  # Sonnet 4.6
-                max_tokens=4096,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_msg}],
-            ) as stream:
-                body, citations, spans = await process_stream(stream, on_event=flusher.append)
+            body, citations, spans = await synthesize_research(
+                queries=(plan.get("queries") or []),
+                system_prompt=system_prompt,
+                user_message=user_msg,
+                on_event=flusher.append,
+            )
             await flusher.flush(final_status="complete")
         except Exception as exc:  # noqa: BLE001
-            logger.exception("run_research streaming failed for %s", proposal_id)
+            logger.exception("run_research failed for %s", proposal_id)
             try:
                 await flusher.flush(final_status="failed", error=str(exc))
             except Exception:  # noqa: BLE001
                 logger.exception("flusher.flush failed during exception handling")
             raise
 
-        # 4. Findings — annotated.
+        # 5. Findings — annotated.
         findings_msg = await self.msg_repo.create(
             proposal_id=proposal_id,
             role=MessageRole.ASSISTANT.value,
@@ -342,19 +340,18 @@ class PipelineService:
             categories_section=categories_section,
         )
 
-        ai = get_ai_service()
+        # Search via Serper + synthesize via Sonnet 4.6 — same shape as
+        # run_research (see HANDOFF § 5e + bedrock-web-search-fix.md Option 2).
         try:
-            # Same Bedrock web_search limitation as run_research — see HANDOFF § 5e.
-            async with ai.client.messages.stream(
-                model=ai.model_for(Tier.BALANCED),     # Sonnet 4.6
-                max_tokens=4096,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_msg}],
-            ) as stream:
-                body, citations, spans = await process_stream(stream, on_event=flusher.append)
+            body, citations, spans = await synthesize_research(
+                queries=(plan.get("queries") or []),
+                system_prompt=system_prompt,
+                user_message=user_msg,
+                on_event=flusher.append,
+            )
             await flusher.flush(final_status="complete")
         except Exception as exc:  # noqa: BLE001
-            logger.exception("run_benchmarks streaming failed for %s", proposal_id)
+            logger.exception("run_benchmarks failed for %s", proposal_id)
             try:
                 await flusher.flush(final_status="failed", error=str(exc))
             except Exception:  # noqa: BLE001

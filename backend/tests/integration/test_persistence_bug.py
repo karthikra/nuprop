@@ -77,16 +77,14 @@ async def test_phase_commits_before_it_would_broadcast(db, monkeypatch):
         AsyncMock(return_value={"queries": ["Acme rebrand"], "rationale": "..."}),
     )
 
-    # Mock the Opus streaming call — emit a single text block whose body becomes
-    # proposal.research.
-    fake_events = [
-        _delta(research_text),
-        _stop(SimpleNamespace(type="text", text=research_text, citations=[])),
-    ]
-    mock_ai = MagicMock()
-    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext(fake_events))
-    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-opus-4-7")
-    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+    # Mock synthesize_research — returns the body that becomes proposal.research.
+    # (Was streaming + tool-use; now Serper + non-streaming synth. See § 5e.)
+    async def _synth(*, queries, system_prompt, user_message, on_event, **_):
+        await on_event({"type": "search", "query": queries[0] if queries else "x",
+                        "ts": "2026-01-01T00:00:00+00:00"})
+        return research_text, [], []
+
+    monkeypatch.setattr("app.services.pipeline_service.synthesize_research", _synth)
 
     # Record every emit with whether the committed research write was visible
     # at that point. The invariant: any broadcast of the *research_findings*

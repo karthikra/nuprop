@@ -50,16 +50,21 @@ class _MockStreamContext:
         return _gen()
 
 
-def _patch_research_pipeline(monkeypatch, *, stream_context):
-    """Patch the Haiku planner + ai service so run_research runs without hitting Bedrock."""
+def _patch_research_pipeline(monkeypatch, *, body: str = "", raises: Exception | None = None):
+    """Patch the Haiku planner + synthesize_research so run_research runs without
+    hitting Bedrock or Serper. (Was: streaming + tool-use; now: synthesize_research.)"""
     monkeypatch.setattr(
         "app.services.pipeline_service.generate_research_plan",
         AsyncMock(return_value={"queries": [], "rationale": ""}),
     )
-    mock_ai = MagicMock()
-    mock_ai.client.messages.stream = MagicMock(return_value=stream_context)
-    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-opus-4-7")
-    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+
+    async def _synth(*, on_event, **_):
+        await on_event({"type": "search", "query": "x", "ts": "2026-01-01T00:00:00+00:00"})
+        if raises is not None:
+            raise raises
+        return body, [], []
+
+    monkeypatch.setattr("app.services.pipeline_service.synthesize_research", _synth)
 
 
 async def test_run_research_task_sets_job_status_and_enqueues_next(db, monkeypatch, make_proposal_db):
@@ -70,13 +75,7 @@ async def test_run_research_task_sets_job_status_and_enqueues_next(db, monkeypat
     pid = str(proposal.id)
 
     body_text = "Acme research summary."
-    _patch_research_pipeline(
-        monkeypatch,
-        stream_context=_MockStreamContext([
-            _delta(body_text),
-            _stop(SimpleNamespace(type="text", text=body_text, citations=[])),
-        ]),
-    )
+    _patch_research_pipeline(monkeypatch, body=body_text)
 
     ctx = _ctx()
     await worker.run_research(ctx, pid)
@@ -103,14 +102,7 @@ async def test_task_marks_failed_and_emits_pipeline_error_on_exception(db, monke
     )
     pid = str(proposal.id)
 
-    class _BrokenStream(_MockStreamContext):
-        def __aiter__(self):
-            async def _gen():
-                raise RuntimeError("LLM down")
-                yield  # pragma: no cover
-            return _gen()
-
-    _patch_research_pipeline(monkeypatch, stream_context=_BrokenStream([]))
+    _patch_research_pipeline(monkeypatch, raises=RuntimeError("LLM down"))
 
     ctx = _ctx()
     await worker.run_research(ctx, pid)  # must NOT raise

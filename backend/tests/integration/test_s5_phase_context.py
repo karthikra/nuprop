@@ -47,44 +47,24 @@ async def test_run_benchmarks_injects_context_into_user_message(
     import app.services.pipeline_service as ps
 
     async def fake_plan(brief):
-        return {"searches": []}
+        return {"queries": [], "rationale": ""}
 
     monkeypatch.setattr(ps, "generate_benchmarks_plan", fake_plan)
 
-    class _FakeStream:
-        def __init__(self, messages): captured["messages"] = messages
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
+    # synthesize_research is the new seam (was streaming + tool-use). It
+    # receives the user_message kwarg directly — capture it for the assertion.
+    async def fake_synth(*, queries, system_prompt, user_message, on_event, **_):
+        captured["user_message"] = user_message
+        return "benchmark body", [], []
 
-    class _FakeMessages:
-        def stream(self, **kwargs):
-            return _FakeStream(kwargs.get("messages"))
-
-    class _FakeClient:
-        messages = _FakeMessages()
-
-    class _FakeAI:
-        client = _FakeClient()
-        def model_for(self, tier): return "fake-model"
-
-    monkeypatch.setattr(ps, "get_ai_service", lambda: _FakeAI())
-
-    async def fake_process_stream(stream, on_event=None):
-        return ("benchmark body", [], [])
-
-    monkeypatch.setattr(ps, "process_stream", fake_process_stream)
-
-    # Patch ActivityFlusher so flush() doesn't error against the fake stream
-    from app.services.research_streaming import ActivityFlusher
-    monkeypatch.setattr(ActivityFlusher, "flush", lambda *a, **kw: _async_noop())
+    monkeypatch.setattr(ps, "synthesize_research", fake_synth)
 
     from app.services.pipeline_service import PipelineService
     from unittest.mock import AsyncMock
     svc = PipelineService(db, AsyncMock())
     await svc.run_benchmarks(proposal.id)
 
-    user_msg = captured["messages"][0]["content"]
-    assert "ACME CONTEXT BRIEF" in user_msg
+    assert "ACME CONTEXT BRIEF" in captured["user_message"]
 
 
 async def _async_noop(*a, **kw):

@@ -1,10 +1,18 @@
-"""End-to-end tests for the new run_research / run_benchmarks behaviour:
-plan + activity log + annotated findings."""
+"""End-to-end tests for run_research / run_benchmarks: plan + activity log + findings.
 
+The Anthropic-hosted ``web_search_20250305`` tool isn't available on AWS Bedrock
+in ap-northeast-1 (see HANDOFF § 5e + bedrock-web-search-fix.md). The pipeline
+now routes through ``web_search_loop.synthesize_research`` which runs Serper-backed
+searches and synthesizes via a single non-streaming Sonnet 4.6 call.
+
+These tests monkeypatch ``synthesize_research`` at its import point in
+``pipeline_service`` — the cleanest seam now that the streaming/tool-use shape
+is gone. Each test verifies a different slice of the contract.
+"""
 from __future__ import annotations
 
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -14,38 +22,39 @@ from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.services.pipeline_service import PipelineService
 
 
-def _start(content_block):
-    return SimpleNamespace(type="content_block_start", content_block=content_block)
+def _make_synthesize_mock(
+    *,
+    body: str = "stub body",
+    citations: list[dict] | None = None,
+    spans: list[dict] | None = None,
+    raises: Exception | None = None,
+    emit_events: list[dict] | None = None,
+):
+    """Build an AsyncMock for synthesize_research that captures call kwargs,
+    emits a few activity events via on_event (so the activity_log message
+    gets a non-empty events array), then returns the canned response."""
+    captured: dict[str, Any] = {}
 
+    async def _impl(*, queries, system_prompt, user_message, on_event, **rest):
+        captured["queries"] = queries
+        captured["system_prompt"] = system_prompt
+        captured["user_message"] = user_message
+        captured["rest"] = rest
+        # Emit something so the flusher has events to persist + the test
+        # can assert that the activity log path runs end-to-end.
+        events = emit_events if emit_events is not None else [
+            {"type": "search", "query": "stub", "ts": "2026-01-01T00:00:00+00:00"},
+            {"type": "read", "url": "https://example.com/a", "title": "A", "ts": "2026-01-01T00:00:00+00:00"},
+            {"type": "note", "text": "synth", "ts": "2026-01-01T00:00:00+00:00"},
+        ]
+        for e in events:
+            await on_event(e)
+        if raises is not None:
+            raise raises
+        return body, citations or [], spans or []
 
-def _delta(text):
-    return SimpleNamespace(
-        type="content_block_delta",
-        delta=SimpleNamespace(type="text_delta", text=text),
-    )
-
-
-def _stop(content_block):
-    return SimpleNamespace(type="content_block_stop", content_block=content_block)
-
-
-class _MockStreamContext:
-    """Stands in for the async context manager returned by messages.stream(...)."""
-
-    def __init__(self, events):
-        self._events = events
-
-    async def __aenter__(self):
-        return self  # async-iterable below
-
-    async def __aexit__(self, *a):
-        return None
-
-    def __aiter__(self):
-        async def _gen():
-            for ev in self._events:
-                yield ev
-        return _gen()
+    mock = AsyncMock(side_effect=_impl)
+    return mock, captured
 
 
 async def test_run_research_emits_plan_activity_log_and_findings(db, monkeypatch, make_proposal_db):
@@ -53,47 +62,24 @@ async def test_run_research_emits_plan_activity_log_and_findings(db, monkeypatch
         brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
         pipeline_state={"current_phase": "research", "phases_completed": []},
     )
-
-    # Mock the planner
     monkeypatch.setattr(
         "app.services.pipeline_service.generate_research_plan",
         AsyncMock(return_value={
             "queries": ["Acme rebrand 2024", "Acme agency relationships"],
-            "rationale": "Cover Acme's strategic context and who they already work with.",
+            "rationale": "Cover Acme's strategic context.",
         }),
     )
-
-    # Mock the AI streaming call. Note: web-search citations don't include
-    # offset fields; spans are computed by matching cited_text against the body.
-    body_text = "Acme rebranded in 2024. Their previous identity was..."
-    cited = "Acme rebranded in 2024."
-    fake_events = [
-        _start(SimpleNamespace(type="tool_use", name="web_search",
-                                input={"query": "Acme rebrand 2024"})),
-        _stop(SimpleNamespace(type="tool_use", name="web_search",
-                               input={"query": "Acme rebrand 2024"})),
-        _stop(SimpleNamespace(type="web_search_tool_result", content=[
-            SimpleNamespace(url="https://example.com/a", title="Acme rebrand article"),
-        ])),
-        _delta(body_text),
-        _stop(SimpleNamespace(
-            type="text", text=body_text,
-            citations=[SimpleNamespace(
-                type="web_search_result_location",
-                url="https://example.com/a", title="Acme rebrand article",
-                cited_text=cited, encrypted_index="enc",
-            )],
-        )),
+    body_text = "Acme rebranded in 2024 [1]. Their previous identity was..."
+    citations = [
+        {"id": 1, "url": "https://example.com/a", "title": "Acme rebrand article",
+         "domain": "example.com", "cited_text": ""},
     ]
-    mock_ai = MagicMock()
-    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext(fake_events))
-    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-opus-4-7")
-    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+    mock_syn, _captured = _make_synthesize_mock(body=body_text, citations=citations)
+    monkeypatch.setattr("app.services.pipeline_service.synthesize_research", mock_syn)
 
     svc = PipelineService(db, AsyncMock())
     await svc.run_research(proposal.id)
 
-    # Three messages should have landed on the main channel.
     async with async_session_factory() as fresh:
         msgs = await ChatMessageRepository(fresh).list_by_proposal(proposal.id)
     types = [m.message_type for m in msgs]
@@ -112,46 +98,39 @@ async def test_run_research_emits_plan_activity_log_and_findings(db, monkeypatch
     assert "read" in event_types
 
     findings = next(m for m in msgs if m.message_type == "research_findings")
-    assert "Acme rebranded in 2024." in findings.content
+    assert "Acme rebranded in 2024" in findings.content
     assert findings.extra_data["phase"] == "research"
     assert len(findings.extra_data["citations"]) == 1
     assert findings.extra_data["citations"][0]["url"] == "https://example.com/a"
     assert findings.extra_data["citations"][0]["domain"] == "example.com"
-    assert findings.extra_data["spans"]
+    # spans intentionally empty under the Serper path — see web_search_loop docstring.
+    assert findings.extra_data["spans"] == []
 
-    # proposal.research carries the plain markdown body (unchanged contract).
     async with async_session_factory() as fresh:
         refetched = await ProposalRepository(fresh).get_by_id(proposal.id)
-    assert "Acme rebranded in 2024." in refetched.research
+    assert "Acme rebranded in 2024" in refetched.research
 
 
-async def test_run_research_uses_balanced_tier_pending_opus_4_7_access(
-    monkeypatch, db, make_proposal_db,
+async def test_run_research_passes_planner_queries_to_synthesizer(
+    db, monkeypatch, make_proposal_db,
 ):
-    """Research currently uses Sonnet 4.6, not Opus, because:
-      (a) this AWS account lacks Opus 4.7 access (Bedrock 403),
-      (b) Opus 4.6 doesn't accept the web_search_20250305 tool (Bedrock 400).
-    Sonnet 4.6 supports web_search (same as run_benchmarks). When Opus 4.7
-    access is granted, flip this back to Tier.HEAVY in pipeline_service.run_research
-    and update this assertion."""
+    """The planner's queries must reach synthesize_research verbatim — it's
+    the contract between the two stages."""
     _, _, proposal = await make_proposal_db(
         brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
         pipeline_state={"current_phase": "research", "phases_completed": []},
     )
     monkeypatch.setattr(
         "app.services.pipeline_service.generate_research_plan",
-        AsyncMock(return_value={"queries": [], "rationale": ""}),
+        AsyncMock(return_value={"queries": ["q1", "q2", "q3"], "rationale": "..."}),
     )
-    mock_ai = MagicMock()
-    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext([]))
-    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-sonnet-4-6")
-    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+    mock_syn, captured = _make_synthesize_mock()
+    monkeypatch.setattr("app.services.pipeline_service.synthesize_research", mock_syn)
 
     svc = PipelineService(db, AsyncMock())
     await svc.run_research(proposal.id)
 
-    from app.services.llm import Tier
-    mock_ai.model_for.assert_called_with(Tier.BALANCED)
+    assert captured["queries"] == ["q1", "q2", "q3"]
 
 
 async def test_run_research_failure_marks_activity_log_failed_and_does_not_create_findings(
@@ -165,18 +144,8 @@ async def test_run_research_failure_marks_activity_log_failed_and_does_not_creat
         "app.services.pipeline_service.generate_research_plan",
         AsyncMock(return_value={"queries": [], "rationale": ""}),
     )
-
-    class _BrokenStream(_MockStreamContext):
-        def __aiter__(self):
-            async def _gen():
-                raise RuntimeError("bedrock died")
-                yield  # pragma: no cover
-            return _gen()
-
-    mock_ai = MagicMock()
-    mock_ai.client.messages.stream = MagicMock(return_value=_BrokenStream([]))
-    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-opus-4-7")
-    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+    mock_syn, _ = _make_synthesize_mock(raises=RuntimeError("bedrock died"))
+    monkeypatch.setattr("app.services.pipeline_service.synthesize_research", mock_syn)
 
     svc = PipelineService(db, AsyncMock())
     with pytest.raises(RuntimeError, match="bedrock died"):
@@ -190,17 +159,18 @@ async def test_run_research_failure_marks_activity_log_failed_and_does_not_creat
     assert log.extra_data["status"] == "failed"
     assert "bedrock died" in (log.extra_data.get("error") or "")
     assert "research_findings" not in types
-    # proposal.research unchanged
+
     async with async_session_factory() as fresh:
         refetched = await ProposalRepository(fresh).get_by_id(proposal.id)
     assert refetched.research is None
 
 
-async def test_run_research_formats_system_prompt_with_no_remaining_placeholders(db, monkeypatch, make_proposal_db):
+async def test_run_research_formats_system_prompt_with_no_remaining_placeholders(
+    db, monkeypatch, make_proposal_db,
+):
     """Regression: RESEARCH_SYSTEM is a str.format template with {client_name},
-    {max_searches}, {context_section}, {template_section} placeholders. The
-    worker must substitute them before sending to Bedrock — otherwise the model
-    receives literal curly-brace text in its system prompt."""
+    {max_searches}, {context_section}, {template_section}. The worker must
+    substitute them before passing the prompt downstream."""
     _, _, proposal = await make_proposal_db(
         brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
         pipeline_state={"current_phase": "research", "phases_completed": []},
@@ -209,21 +179,15 @@ async def test_run_research_formats_system_prompt_with_no_remaining_placeholders
         "app.services.pipeline_service.generate_research_plan",
         AsyncMock(return_value={"queries": [], "rationale": ""}),
     )
-    mock_ai = MagicMock()
-    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext([]))
-    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-opus-4-7")
-    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+    mock_syn, captured = _make_synthesize_mock()
+    monkeypatch.setattr("app.services.pipeline_service.synthesize_research", mock_syn)
 
     svc = PipelineService(db, AsyncMock())
     await svc.run_research(proposal.id)
 
-    kwargs = mock_ai.client.messages.stream.call_args.kwargs
-    system_arg = kwargs["system"]
-    # Verify no leftover format placeholders. We check the specific placeholders
-    # from RESEARCH_SYSTEM rather than just "{" — a system prompt may legitimately
-    # contain a JSON example with braces.
+    system_prompt = captured["system_prompt"]
     for placeholder in ("{client_name}", "{max_searches}", "{context_section}", "{template_section}"):
-        assert placeholder not in system_arg, f"unformatted placeholder in system prompt: {placeholder}"
+        assert placeholder not in system_prompt, f"unformatted placeholder: {placeholder}"
 
 
 async def test_run_benchmarks_emits_separate_findings_message_with_benchmarks_phase(
@@ -233,7 +197,6 @@ async def test_run_benchmarks_emits_separate_findings_message_with_benchmarks_ph
         brief={"client": {"name": "Acme"}, "project": {"deliverables": [{"category": "Logo"}]}},
         pipeline_state={"current_phase": "research", "phases_completed": []},
     )
-
     monkeypatch.setattr(
         "app.services.pipeline_service.generate_benchmarks_plan",
         AsyncMock(return_value={
@@ -241,31 +204,13 @@ async def test_run_benchmarks_emits_separate_findings_message_with_benchmarks_ph
             "rationale": "Find India-specific rate ranges.",
         }),
     )
-
-    body_text = "Typical India logo design rates: 50k-3 lakh."
-    cited = "50k-3 lakh"
-    fake_events = [
-        _start(SimpleNamespace(type="tool_use", name="web_search",
-                                input={"query": "logo design India rates 2024"})),
-        _stop(SimpleNamespace(type="tool_use", name="web_search",
-                               input={"query": "logo design India rates 2024"})),
-        _stop(SimpleNamespace(type="web_search_tool_result", content=[
-            SimpleNamespace(url="https://example.com/rates", title="India rate card"),
-        ])),
-        _delta(body_text),
-        _stop(SimpleNamespace(
-            type="text", text=body_text,
-            citations=[SimpleNamespace(
-                type="web_search_result_location",
-                url="https://example.com/rates", title="India rate card",
-                cited_text=cited, encrypted_index="enc",
-            )],
-        )),
+    body_text = "Typical India logo design rates: 50k-3 lakh [1]."
+    citations = [
+        {"id": 1, "url": "https://example.com/rates", "title": "India rate card",
+         "domain": "example.com", "cited_text": ""},
     ]
-    mock_ai = MagicMock()
-    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext(fake_events))
-    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-sonnet-4-6")
-    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+    mock_syn, _ = _make_synthesize_mock(body=body_text, citations=citations)
+    monkeypatch.setattr("app.services.pipeline_service.synthesize_research", mock_syn)
 
     svc = PipelineService(db, AsyncMock())
     await svc.run_benchmarks(proposal.id)
@@ -276,40 +221,17 @@ async def test_run_benchmarks_emits_separate_findings_message_with_benchmarks_ph
     assert "benchmarks_plan" in types
     assert "benchmarks_activity_log" in types
     assert "benchmarks_findings" in types
-    # The OLD combined "research_findings"-with-both-bodies emit is gone.
-    findings_count = sum(1 for m in msgs if m.message_type == "research_findings")
-    assert findings_count == 0  # this test only ran benchmarks, not research
+    # Benchmarks doesn't write to the research_findings type.
+    assert sum(1 for m in msgs if m.message_type == "research_findings") == 0
 
     findings = next(m for m in msgs if m.message_type == "benchmarks_findings")
     assert findings.extra_data["phase"] == "benchmarks"
     assert "50k-3 lakh" in findings.content
 
 
-async def test_run_benchmarks_uses_balanced_sonnet_tier(monkeypatch, db, make_proposal_db):
-    _, _, proposal = await make_proposal_db(
-        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
-        pipeline_state={"current_phase": "research", "phases_completed": []},
-    )
-    monkeypatch.setattr(
-        "app.services.pipeline_service.generate_benchmarks_plan",
-        AsyncMock(return_value={"queries": [], "rationale": ""}),
-    )
-    mock_ai = MagicMock()
-    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext([]))
-    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-sonnet-4-6")
-    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
-
-    svc = PipelineService(db, AsyncMock())
-    await svc.run_benchmarks(proposal.id)
-
-    from app.services.llm import Tier
-    mock_ai.model_for.assert_called_with(Tier.BALANCED)
-
-
-async def test_run_benchmarks_formats_system_prompt_with_no_remaining_placeholders(db, monkeypatch, make_proposal_db):
-    """Regression: BENCHMARK_SYSTEM is a str.format template with
-    {max_searches} and {categories_section} placeholders. The worker must
-    substitute them before sending to Bedrock."""
+async def test_run_benchmarks_formats_system_prompt_with_no_remaining_placeholders(
+    db, monkeypatch, make_proposal_db,
+):
     _, _, proposal = await make_proposal_db(
         brief={"client": {"name": "Acme"}, "project": {"deliverables": [{"category": "Logo"}]}},
         pipeline_state={"current_phase": "research", "phases_completed": []},
@@ -318,17 +240,13 @@ async def test_run_benchmarks_formats_system_prompt_with_no_remaining_placeholde
         "app.services.pipeline_service.generate_benchmarks_plan",
         AsyncMock(return_value={"queries": [], "rationale": ""}),
     )
-    mock_ai = MagicMock()
-    mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext([]))
-    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-sonnet-4-6")
-    monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
+    mock_syn, captured = _make_synthesize_mock()
+    monkeypatch.setattr("app.services.pipeline_service.synthesize_research", mock_syn)
 
     svc = PipelineService(db, AsyncMock())
     await svc.run_benchmarks(proposal.id)
 
-    kwargs = mock_ai.client.messages.stream.call_args.kwargs
-    system_arg = kwargs["system"]
+    system_prompt = captured["system_prompt"]
     for placeholder in ("{max_searches}", "{categories_section}"):
-        assert placeholder not in system_arg, f"unformatted placeholder in system prompt: {placeholder}"
-    # The categories section should mention "Logo" (the deliverable category).
-    assert "Logo" in system_arg
+        assert placeholder not in system_prompt, f"unformatted placeholder: {placeholder}"
+    assert "Logo" in system_prompt
