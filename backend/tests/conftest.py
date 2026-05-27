@@ -69,6 +69,38 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(AnthropicClient, "stream", _blocked, raising=False)
     monkeypatch.setattr(AnthropicClient, "is_configured", property(lambda self: False))
 
+    # Media — fal.ai + S3 network calls must never run for real in tests.
+    async def _blocked_async_media(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("Real fal.ai call attempted during a test")
+
+    async def _blocked_async_upload(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("Real S3 upload_bytes attempted during a test")
+
+    async def _blocked_async_delete(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise RuntimeError("Real S3 delete_object attempted during a test")
+
+    def _fake_presign_get(key: str) -> str:
+        return f"https://s3.example/{key}?signed=test"
+
+    def _fake_presign_put(*, key, content_type, content_length):  # noqa: ANN001
+        return f"https://s3.example/{key}?upload=test"
+
+    monkeypatch.setattr(
+        "app.services.media._fal.fal_subscribe", _blocked_async_media, raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.media._s3.upload_bytes", _blocked_async_upload, raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.media._s3.delete_object", _blocked_async_delete, raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.media._s3.generate_presigned_get", _fake_presign_get, raising=False,
+    )
+    monkeypatch.setattr(
+        "app.services.media._s3.generate_presigned_put", _fake_presign_put, raising=False,
+    )
+
 
 # ── Database / schema ────────────────────────────────────────────────────────
 @pytest_asyncio.fixture
