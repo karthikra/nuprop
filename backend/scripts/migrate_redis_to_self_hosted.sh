@@ -46,7 +46,8 @@ if ! fly auth whoami >/dev/null 2>&1; then
     exit 1
 fi
 
-if ! fly apps show "$APP" >/dev/null 2>&1; then
+# Note: Fly CLI's `apps show` was removed in recent versions; check via `apps list`.
+if ! fly apps list --json | jq -e --arg n "$APP" '.[] | select(.Name == $n)' >/dev/null 2>&1; then
     echo "ERROR: target app '$APP' not found in your Fly account"
     exit 1
 fi
@@ -56,8 +57,10 @@ echo "==> Migrating Redis for app '$APP' to self-hosted '$REDIS_APP' in region '
 echo
 
 # ── Capture current REDIS_URL digest for reference ──────────────────────────
+# Note: fly secrets list --json uses lowercase keys (name, digest, status),
+# whereas fly apps list --json uses TitleCase. Fly is inconsistent across endpoints.
 OLD_DIGEST=$(fly secrets list -a "$APP" --json 2>/dev/null \
-    | jq -r '.[] | select(.Name == "REDIS_URL") | .Digest' \
+    | jq -r '.[] | select(.name == "REDIS_URL") | .digest' \
     || echo "")
 if [[ -n "$OLD_DIGEST" ]]; then
     echo "Current REDIS_URL digest on $APP: $OLD_DIGEST"
@@ -82,7 +85,7 @@ echo
 # ── Step 1: Create the new app ──────────────────────────────────────────────
 echo
 echo "==> [1/6] Creating Fly app: $REDIS_APP"
-if fly apps show "$REDIS_APP" >/dev/null 2>&1; then
+if fly apps list --json | jq -e --arg n "$REDIS_APP" '.[] | select(.Name == $n)' >/dev/null 2>&1; then
     echo "    app already exists, skipping"
 else
     fly apps create "$REDIS_APP"
