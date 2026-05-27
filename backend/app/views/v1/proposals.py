@@ -29,6 +29,7 @@ from app.services.media.image_gen import generate_image
 from app.services.media.section_assets import (
     append_asset_to_section,
     remove_asset_from_section,
+    resign_assets,
 )
 from app.services.rate_card_excel_parser import MAX_BYTES, parse_and_extract
 from app.services.sections import FACT_SECTIONS, SECTION_ORDER, SYNTHESIS_SECTIONS
@@ -36,6 +37,21 @@ from app.services.ai.section_facts import generate_fact_section
 from app.services.ai.section_synthesis import generate_synthesis_section
 from app.viewmodels.proposal_viewmodel import ProposalViewModel
 from app.viewmodels.rate_card_viewmodel import RateCardViewModel
+
+
+def _resign_response_sections(resp: ProposalResponse) -> ProposalResponse:
+    """Return ``resp`` with every section's ``assets[].url`` freshly signed.
+
+    Operates on the Pydantic response — never mutates the SA model (that would
+    be persisted by ``get_db``'s on-exit commit).
+    """
+    for col in SECTION_ORDER:
+        current = getattr(resp, col, None)
+        if current is None or not current.get("assets"):
+            continue
+        setattr(resp, col, resign_assets(current, signer=_s3.generate_presigned_get))
+    return resp
+
 
 router = APIRouter(prefix="/proposals", tags=["proposals"])
 
@@ -92,7 +108,7 @@ async def get_proposal(
     proposal = await vm.get_proposal(proposal_id, agency_id)
     if not proposal:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
-    return proposal
+    return _resign_response_sections(ProposalResponse.model_validate(proposal))
 
 
 @router.patch("/{proposal_id}", response_model=ProposalResponse)
@@ -105,7 +121,7 @@ async def update_proposal(
     proposal = await vm.update_proposal(proposal_id, agency_id, data)
     if not proposal:
         raise HTTPException(status_code=vm.status_code, detail=vm.error)
-    return proposal
+    return _resign_response_sections(ProposalResponse.model_validate(proposal))
 
 
 @router.delete("/{proposal_id}", status_code=status.HTTP_204_NO_CONTENT)

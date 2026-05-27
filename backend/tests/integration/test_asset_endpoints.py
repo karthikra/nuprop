@@ -405,3 +405,28 @@ async def test_generate_translates_fal_runtime_error_to_502(client, _proposal, m
     )
     assert r.status_code == 502
     assert "Image generation failed" in r.json()["detail"]
+
+
+async def test_get_proposal_resigns_every_asset_url(client, _proposal, db):
+    proposal, headers = _proposal
+    # Seed two assets directly, both with stale URLs.
+    await ProposalRepository(db).update(
+        proposal.id,
+        problem_statement={
+            "content": "x",
+            "assets": [
+                {"id": "a1", "kind": "image", "s3_key": "k1", "url": "stale-1"},
+                {"id": "a2", "kind": "image", "s3_key": "k2", "url": "stale-2"},
+            ],
+            "included": True,
+            "metadata": {},
+        },
+    )
+    await db.commit()
+
+    r = await client.get(f"{API}/proposals/{proposal.id}", headers=headers)
+    assert r.status_code == 200
+    body = r.json()
+    assets = body["problem_statement"]["assets"]
+    assert assets[0]["url"] == "https://s3.example/k1?signed=test"
+    assert assets[1]["url"] == "https://s3.example/k2?signed=test"
