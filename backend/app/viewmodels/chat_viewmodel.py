@@ -45,22 +45,37 @@ class ChatViewModel(ViewModelBase):
     ) -> None:
         """Push a pipeline-phase job onto the ARQ pool held on app.state.
 
-        ARQ uses ``_job_id`` as an idempotency key — once a result exists for an
-        ID, subsequent enqueues of the same ID are silently dropped for the
-        result-TTL window (24h by default). That's correct for one-shot gate
-        approvals (prevents double-runs from accidental double-clicks) but
-        breaks multi-turn flows like ``analyze_brief`` where every user message
-        must trigger a fresh run.
+        ARQ uses ``_job_id`` as an idempotency key. Two layers of dedup:
+          (a) In-flight: if the same _job_id is currently queued or being
+              processed, ARQ silently drops the duplicate — protects against
+              accidental double-clicks on Approve.
+          (b) Result-cache: if a prior call with this _job_id has a result in
+              Redis (24h TTL by default), subsequent enqueues are silently
+              dropped. **This breaks the retry-after-failure flow** — a failed
+              gate-approval leaves a poisoned result key, and every later
+              "retry" silently no-ops for ~24h.
 
-        Callers that need a fresh run per invocation pass an
-        ``idempotency_key`` (e.g. the user message ID); it's appended to the
-        job_id so each turn gets its own slot in ARQ's result store.
+        We want (a) but not (b). Fix: explicitly DEL the result key before
+        enqueueing. In-flight dedup still works because the queue/in-progress
+        keys aren't touched.
+
+        Callers that need a fresh run per invocation (e.g. ``analyze_brief``
+        per chat turn) still pass an ``idempotency_key`` to get a unique
+        _job_id; the result-key DEL is a no-op for those since the key never
+        existed under the unique ID.
         """
         pool = self._request.app.state.arq_pool
         suffix = f":{idempotency_key}" if idempotency_key else ""
-        await pool.enqueue_job(
-            job_name, str(proposal_id), _job_id=f"{proposal_id}:{job_name}{suffix}"
-        )
+        job_id = f"{proposal_id}:{job_name}{suffix}"
+        # Clear any stale prior result so a deliberate retry can re-enqueue.
+        # In-flight dedup via queue/in-progress keys is unaffected.
+        try:
+            await pool.delete(f"arq:result:{job_id}")
+        except Exception:  # noqa: BLE001
+            # Don't fail enqueue on a transient redis hiccup; ARQ's own
+            # connect-with-retry will reraise something more useful below.
+            pass
+        await pool.enqueue_job(job_name, str(proposal_id), _job_id=job_id)
 
     async def _set_job_queued(self, proposal, phase: str) -> dict:
         """Return a copy of proposal.pipeline_state with job_status set to queued."""

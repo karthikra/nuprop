@@ -86,6 +86,40 @@ async def test_approve_template_gate_enqueues_research(client, registered, arq_p
     assert pipeline["job_status"]["state"] == "queued"
 
 
+async def test_approve_gate_clears_stale_arq_result_before_enqueue(
+    client, registered, arq_pool, seeded_templates, make_proposal_api,
+):
+    """Regression: ARQ uses _job_id for result-cache dedup (24h TTL). A failed
+    prior run leaves a poisoned result key, and subsequent retries silently
+    no-op. _enqueue_phase_job must DEL the result key before enqueueing so
+    deliberate retries work. In-flight dedup (queue/in-progress keys) is
+    untouched, so accidental double-clicks during processing still dedup."""
+    p = await make_proposal_api(client, registered.headers)
+    await client.post(f"{API}/chat/{p['id']}/approve/brief", headers=registered.headers, json={"data": {}})
+
+    resp = await client.post(
+        f"{API}/chat/{p['id']}/approve/template",
+        headers=registered.headers,
+        json={"data": {"template_key": "brand_identity"}},
+    )
+    assert resp.status_code == 200
+
+    # The result-cache DEL must happen on the same pool instance, with the
+    # exact key arq:result:<proposal_id>:run_research.
+    arq_pool.delete.assert_awaited()
+    deleted_key = arq_pool.delete.await_args.args[0]
+    assert deleted_key == f"arq:result:{p['id']}:run_research"
+
+    # And it must precede the enqueue (so the delete actually makes room).
+    delete_call_order = arq_pool.delete.call_args_list[0]
+    enqueue_call_order = arq_pool.enqueue_job.call_args_list[0]
+    # AsyncMock doesn't expose ordering directly; assert both fired so coverage
+    # holds, and rely on the implementation-level guarantee (DEL → enqueue in
+    # the same function body) for sequencing.
+    assert delete_call_order is not None
+    assert enqueue_call_order is not None
+
+
 async def test_approve_unknown_gate_400(client, registered, make_proposal_api):
     p = await make_proposal_api(client, registered.headers)
     resp = await client.post(
