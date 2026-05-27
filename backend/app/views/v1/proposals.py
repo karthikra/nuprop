@@ -16,6 +16,18 @@ from app.domain.schemas.proposal_schemas import (
 )
 from app.infrastructure.db.database import get_db
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+from app.services.media import _s3
+from app.services.media._common import (
+    build_s3_key,
+    ext_from_mime,
+    new_asset_id,
+    validate_upload,
+)
+from app.services.media.image_gen import generate_image
+from app.services.media.section_assets import (
+    append_asset_to_section,
+    remove_asset_from_section,
+)
 from app.services.rate_card_excel_parser import MAX_BYTES, parse_and_extract
 from app.services.sections import FACT_SECTIONS, SECTION_ORDER, SYNTHESIS_SECTIONS
 from app.services.ai.section_facts import generate_fact_section
@@ -265,9 +277,43 @@ class RefineSectionBody(BaseModel):
     instructions: str
 
 
+class PresignAssetBody(BaseModel):
+    kind: str
+    filename: str
+    content_type: str
+    size: int
+
+
+class CommitAssetBody(BaseModel):
+    asset_id: str
+    s3_key: str
+    kind: str
+    content_type: str
+    caption: str | None = None
+    width: int | None = None
+    height: int | None = None
+
+
+class GenerateAssetBody(BaseModel):
+    kind: str
+    prompt: str
+
+
 def _validate_section_type(section_type: str) -> None:
     if section_type not in SECTION_ORDER:
         raise HTTPException(status_code=400, detail=f"Unknown section type: {section_type}")
+
+
+async def _resolve_proposal(repo: ProposalRepository, proposal_id: UUID, agency_id: UUID):
+    proposal = await repo.get_by_id(proposal_id)
+    if not proposal or str(proposal.agency_id) != str(agency_id):
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    return proposal
+
+
+def _resign_asset(asset: dict) -> dict:
+    """Re-sign a single asset's ``url`` from its ``s3_key`` (returns a copy)."""
+    return {**asset, "url": _s3.generate_presigned_get(asset["s3_key"])}
 
 
 @router.patch("/{proposal_id}/sections/{section_type}", status_code=200)
@@ -339,6 +385,145 @@ async def refine_section(
     await repo.update(proposal_id, **{section_type: new_payload})
     await db.commit()
     return new_payload
+
+
+# ── Section asset endpoints (S10: image only; S11 widens kind) ───────────────
+
+
+@router.post(
+    "/{proposal_id}/sections/{section_type}/assets/presign",
+    status_code=200,
+)
+async def presign_asset(
+    proposal_id: UUID,
+    section_type: str,
+    body: PresignAssetBody,
+    agency_id: UUID = Depends(get_current_agency_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _validate_section_type(section_type)
+    repo = ProposalRepository(db)
+    proposal = await _resolve_proposal(repo, proposal_id, agency_id)
+
+    try:
+        validate_upload(kind=body.kind, content_type=body.content_type, size=body.size)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    ext = ext_from_mime(body.content_type) or "bin"
+    asset_id = new_asset_id()
+    s3_key = build_s3_key(
+        agency_id=str(proposal.agency_id),
+        proposal_id=str(proposal.id),
+        asset_id=asset_id,
+        ext=ext,
+    )
+    upload_url = _s3.generate_presigned_put(
+        key=s3_key,
+        content_type=body.content_type,
+        content_length=body.size,
+    )
+    return {"upload_url": upload_url, "s3_key": s3_key, "asset_id": asset_id}
+
+
+@router.post(
+    "/{proposal_id}/sections/{section_type}/assets/commit",
+    status_code=200,
+)
+async def commit_asset(
+    proposal_id: UUID,
+    section_type: str,
+    body: CommitAssetBody,
+    agency_id: UUID = Depends(get_current_agency_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _validate_section_type(section_type)
+    repo = ProposalRepository(db)
+    proposal = await _resolve_proposal(repo, proposal_id, agency_id)
+
+    if body.kind not in ("image", "video", "audio"):
+        raise HTTPException(status_code=400, detail=f"Unknown kind: {body.kind}")
+
+    asset: dict = {
+        "id": body.asset_id,
+        "kind": body.kind,
+        "s3_key": body.s3_key,
+        "caption": body.caption,
+        "ai_generated": False,
+        "prompt": None,
+        "provider": "upload",
+        "width": body.width,
+        "height": body.height,
+        "duration_s": None,
+        "poster_s3_key": None,
+    }
+    current = getattr(proposal, section_type)
+    new_section = append_asset_to_section(current, asset)
+    await repo.update(proposal_id, **{section_type: new_section})
+    await db.commit()
+    return _resign_asset(asset)
+
+
+@router.post(
+    "/{proposal_id}/sections/{section_type}/assets/generate",
+    status_code=200,
+)
+async def generate_asset(
+    proposal_id: UUID,
+    section_type: str,
+    body: GenerateAssetBody,
+    agency_id: UUID = Depends(get_current_agency_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _validate_section_type(section_type)
+    repo = ProposalRepository(db)
+    proposal = await _resolve_proposal(repo, proposal_id, agency_id)
+
+    if body.kind != "image":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Generation for kind={body.kind!r} is not supported yet (S10 ships image only)",
+        )
+
+    asset = await generate_image(
+        prompt=body.prompt,
+        agency_id=str(proposal.agency_id),
+        proposal_id=str(proposal.id),
+    )
+    current = getattr(proposal, section_type)
+    new_section = append_asset_to_section(current, asset)
+    await repo.update(proposal_id, **{section_type: new_section})
+    await db.commit()
+    return _resign_asset(asset)
+
+
+@router.delete(
+    "/{proposal_id}/sections/{section_type}/assets/{asset_id}",
+    status_code=204,
+)
+async def delete_asset(
+    proposal_id: UUID,
+    section_type: str,
+    asset_id: str,
+    agency_id: UUID = Depends(get_current_agency_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _validate_section_type(section_type)
+    repo = ProposalRepository(db)
+    proposal = await _resolve_proposal(repo, proposal_id, agency_id)
+
+    current = getattr(proposal, section_type)
+    if not current or not current.get("assets"):
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    new_section, removed = remove_asset_from_section(current, asset_id=asset_id)
+    if removed is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    await _s3.delete_object(removed["s3_key"])
+    await repo.update(proposal_id, **{section_type: new_section})
+    await db.commit()
+    return Response(status_code=204)
 
 
 async def _generate_section(
