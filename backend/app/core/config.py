@@ -50,9 +50,11 @@ class Settings(BaseSettings):
 
     # Bedrock global inference profile IDs — tiered model selection.
     # Verified via `aws bedrock list-inference-profiles --region ap-northeast-1`.
-    # The skill's published IDs had wrong suffixes for Sonnet 4.6 and Haiku 4.5.
+    # Heavy tier is Opus 4.6 (the -v1 suffix is part of the canonical ID, not optional).
+    # This account lacks access to Opus 4.7; 4.6 still accepts temperature/top_p/top_k
+    # and the older `thinking={"type": "enabled", "budget_tokens": ...}` syntax.
     ANTHROPIC_DEFAULT_MODEL: str = "global.anthropic.claude-sonnet-4-6"           # balanced
-    ANTHROPIC_OPUS_MODEL: str = "global.anthropic.claude-opus-4-7"                # heavy
+    ANTHROPIC_OPUS_MODEL: str = "global.anthropic.claude-opus-4-6-v1"             # heavy
     ANTHROPIC_HAIKU_MODEL: str = "global.anthropic.claude-haiku-4-5-20251001-v1:0"  # fast
 
     # Voyage (embeddings)
