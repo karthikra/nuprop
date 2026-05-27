@@ -36,11 +36,13 @@ def test_ext_from_mime_unknown_returns_none():
 
 
 def test_new_asset_id_is_a_uuid4_string():
+    import uuid
     a = new_asset_id()
     b = new_asset_id()
     assert isinstance(a, str)
-    assert len(a) == 36
-    assert a != b  # 1-in-2**122 collision; safe
+    parsed = uuid.UUID(a)            # raises ValueError if not a valid UUID
+    assert parsed.version == 4       # specifically v4
+    assert a != b
 
 
 def test_build_s3_key_shape():
@@ -53,8 +55,52 @@ def test_build_s3_key_shape():
     assert key == "agency-uuid/proposal-uuid/asset-uuid.png"
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("agency_id", "../foo"),
+        ("agency_id", "agency/with/slash"),
+        ("proposal_id", "../"),
+        ("asset_id", ".."),
+        ("asset_id", "with space"),
+    ],
+)
+def test_build_s3_key_rejects_unsafe_id_segments(field, value):
+    args = {
+        "agency_id": "agency-1",
+        "proposal_id": "proposal-1",
+        "asset_id": "asset-1",
+        "ext": "png",
+    }
+    args[field] = value
+    with pytest.raises(ValueError, match=field):
+        build_s3_key(**args)
+
+
+@pytest.mark.parametrize("bad_ext", ["png/..", "../etc", "PNG", "p" * 9, "", "p.g"])
+def test_build_s3_key_rejects_unsafe_ext(bad_ext):
+    with pytest.raises(ValueError, match="ext"):
+        build_s3_key(
+            agency_id="agency-1",
+            proposal_id="proposal-1",
+            asset_id="asset-1",
+            ext=bad_ext,
+        )
+
+
 def test_validate_upload_accepts_in_range_image():
     validate_upload(kind="image", content_type="image/png", size=5 * 1024 * 1024)
+
+
+@pytest.mark.parametrize(
+    "kind,mime,size",
+    [
+        ("video", "video/mp4", 100 * 1024 * 1024),
+        ("audio", "audio/mpeg", 10 * 1024 * 1024),
+    ],
+)
+def test_validate_upload_accepts_in_range_video_and_audio(kind, mime, size):
+    validate_upload(kind=kind, content_type=mime, size=size)
 
 
 def test_validate_upload_rejects_oversize_image():

@@ -10,6 +10,7 @@ read — never trust the persisted value past its 1h TTL.
 from __future__ import annotations
 
 import enum
+import re
 import uuid
 from typing import TypedDict
 
@@ -71,8 +72,29 @@ def ext_from_mime(content_type: str) -> str | None:
     return _MIME_TO_EXT.get(content_type)
 
 
+# Allow UUID4 hex + dashes, plus underscores for any future namespacing.
+_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+# Lowercase alphanumeric, 1-8 chars — matches every value in _MIME_TO_EXT.
+_EXT_RE = re.compile(r"^[a-z0-9]{1,8}$")
+
+
 def build_s3_key(*, agency_id: str, proposal_id: str, asset_id: str, ext: str) -> str:
-    """Canonical S3 object key: ``{agency_id}/{proposal_id}/{asset_id}.{ext}``."""
+    """Canonical S3 object key: ``{agency_id}/{proposal_id}/{asset_id}.{ext}``.
+
+    All id segments must match ``[A-Za-z0-9_-]+`` (UUID4 + safe variants);
+    ``ext`` must be lowercase alphanumeric (1-8 chars). Rejects path-traversal
+    or any non-safe character — defence-in-depth even though today's only
+    callers pass UUID4-shaped strings.
+    """
+    for name, value in (
+        ("agency_id", agency_id),
+        ("proposal_id", proposal_id),
+        ("asset_id", asset_id),
+    ):
+        if not _ID_RE.fullmatch(value):
+            raise ValueError(f"{name} contains illegal characters: {value!r}")
+    if not _EXT_RE.fullmatch(ext):
+        raise ValueError(f"ext is not a safe extension: {ext!r}")
     return f"{agency_id}/{proposal_id}/{asset_id}.{ext}"
 
 
