@@ -28,9 +28,15 @@ export function ChatInput({ onSend, disabled }: Props) {
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setValue(e.target.value)
+    // Defer the auto-grow layout pass to the next frame so the keystroke
+    // paints immediately. Reading scrollHeight forces a sync layout recalc
+    // of the entire page — measurable jank on the proposal builder where
+    // the sidebar + preference panel are also mounted.
     const el = e.target
-    el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+    requestAnimationFrame(() => {
+      el.style.height = 'auto'
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+    })
   }
 
   return (
