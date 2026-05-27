@@ -1,229 +1,177 @@
-"""Unit tests for the Serper-backed search + synthesis helper.
+"""Unit tests for the hosted-web-search streaming helper.
 
-Replaces the broken Anthropic-hosted web_search path (Bedrock 400). Tests
-mock both the WebSearchClient (Serper) and the AIService so they're pure
-in-memory and don't depend on any infra.
+``synthesize_research`` routes to Anthropic's direct API (not Bedrock)
+because Bedrock in ap-northeast-1 doesn't expose the hosted web_search
+tool. Tests patch ``AsyncAnthropic`` + ``process_stream`` so no real
+network call ever runs.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.infrastructure.external.web_search_client import SearchResult
 from app.services.ai import web_search_loop
-from app.services.llm import LLMResult, Tier
+from app.services.llm import Tier
 
 
-@pytest.fixture
-def _fake_search_client():
-    """Returns a WebSearchClient whose .search returns canned results per query."""
-    client = MagicMock()
-    canned = {
-        "acme rebrand": [
-            SearchResult(title="Acme Q3 results", url="https://example.com/acme-q3", snippet="rev up 12%"),
-            SearchResult(title="Acme press release", url="https://example.com/acme-pr", snippet="rebranding push"),
-        ],
-        "acme industry": [
-            SearchResult(title="Industry overview", url="https://example.com/industry", snippet="market is hot"),
-        ],
-    }
+class _FakeStream:
+    """Stands in for the async-context-manager returned by ``messages.stream``."""
 
-    async def _search(query, num_results=5):  # noqa: ARG001
-        return canned.get(query, [])
+    def __init__(self):
+        self.kwargs = None
 
-    client.search = AsyncMock(side_effect=_search)
-    return client
+    async def __aenter__(self):
+        return self  # process_stream is mocked, so the stream body isn't iterated
+
+    async def __aexit__(self, *args):
+        return None
 
 
-@pytest.fixture
-def _fake_ai(monkeypatch):
-    """Patch get_ai_service to return an AI mock that yields a fixed LLMResult."""
-    mock = MagicMock()
-    mock.complete = AsyncMock(return_value=LLMResult(
-        text="# Acme research\n\nAcme had strong Q3 [1]. Rebranding is underway [2].",
-        input_tokens=100,
-        output_tokens=42,
-    ))
-    monkeypatch.setattr(web_search_loop, "get_ai_service", lambda: mock)
-    return mock
+def _install_fake_anthropic(monkeypatch, *, capture: dict):
+    """Patch ``anthropic.AsyncAnthropic`` so synthesize_research doesn't hit
+    the real API. Returned dict captures construction + stream call kwargs."""
+    fake_stream = _FakeStream()
+
+    def _stream(**kwargs):
+        capture["stream_kwargs"] = kwargs
+        return fake_stream
+
+    fake_client = MagicMock()
+    fake_client.messages.stream = _stream
+
+    def _AsyncAnthropic(**kwargs):  # noqa: N802 — mirror real class name
+        capture["client_kwargs"] = kwargs
+        return fake_client
+
+    fake_anthropic_module = SimpleNamespace(AsyncAnthropic=_AsyncAnthropic)
+    monkeypatch.setitem(__import__("sys").modules, "anthropic", fake_anthropic_module)
+    return fake_client
 
 
-async def test_execute_search_plan_emits_search_and_read_events(_fake_search_client):
-    events: list[dict] = []
+def _install_fake_process_stream(monkeypatch, *, body: str = "research body", citations=None, spans=None):
+    """Patch ``process_stream`` so we control the (body, citations, spans) tuple
+    that synthesize_research returns, AND verify the on_event callback fires."""
+    citations = citations or []
+    spans = spans or []
 
-    async def collect(e):
-        events.append(e)
+    async def _fake(stream, *, on_event):
+        # Mimic the real process_stream's event emission so callers see activity.
+        await on_event({"type": "search", "query": "hosted-search-query"})
+        await on_event({"type": "read", "url": "https://hosted.example/a", "title": "A"})
+        return body, citations, spans
 
-    results = await web_search_loop.execute_search_plan(
-        queries=["acme rebrand", "acme industry"],
-        on_event=collect,
-        web_search_client=_fake_search_client,
-    )
-
-    # Two queries -> two search events.
-    search_events = [e for e in events if e["type"] == "search"]
-    assert [e["query"] for e in search_events] == ["acme rebrand", "acme industry"]
-
-    # Three unique URLs across both queries -> three read events.
-    read_events = [e for e in events if e["type"] == "read"]
-    assert len(read_events) == 3
-    assert {e["url"] for e in read_events} == {
-        "https://example.com/acme-q3",
-        "https://example.com/acme-pr",
-        "https://example.com/industry",
-    }
-    # Read events carry a title.
-    for r in read_events:
-        assert r["title"]
-
-    # Returned results match the read order (deduped, ordered).
-    assert [r.url for r in results] == [
-        "https://example.com/acme-q3",
-        "https://example.com/acme-pr",
-        "https://example.com/industry",
-    ]
+    monkeypatch.setattr(web_search_loop, "process_stream", _fake)
 
 
-async def test_execute_search_plan_skips_empty_queries(_fake_search_client):
-    events: list[dict] = []
+async def test_synthesize_research_uses_direct_api_with_hosted_tool(monkeypatch):
+    """The streaming call must (a) instantiate AsyncAnthropic with the direct
+    API key, (b) include the web_search_20250305 tool, (c) use a bare model
+    ID (not a Bedrock inference-profile ID)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")  # cleared then set via settings
+    from app.core.config import Settings
 
-    async def collect(e):
-        events.append(e)
+    # Patch get_settings to return a Settings with our key.
+    fake_settings = Settings(ANTHROPIC_API_KEY="sk-direct-test-key")
+    monkeypatch.setattr(web_search_loop, "get_settings", lambda: fake_settings)
 
-    await web_search_loop.execute_search_plan(
-        queries=["", "acme rebrand", ""],
-        on_event=collect,
-        web_search_client=_fake_search_client,
-    )
-
-    # Only the non-empty query produces a search event.
-    assert sum(1 for e in events if e["type"] == "search") == 1
-
-
-async def test_execute_search_plan_deduplicates_repeated_urls(monkeypatch):
-    client = MagicMock()
-    same_result = SearchResult(title="Same", url="https://example.com/same", snippet="x")
-
-    async def _search(query, num_results=5):  # noqa: ARG001
-        return [same_result]
-
-    client.search = AsyncMock(side_effect=_search)
+    capture: dict = {}
+    _install_fake_anthropic(monkeypatch, capture=capture)
+    _install_fake_process_stream(monkeypatch)
 
     events: list[dict] = []
-    results = await web_search_loop.execute_search_plan(
-        queries=["q1", "q2", "q3"],
-        on_event=lambda e: _append_async(events, e),
-        web_search_client=client,
-    )
 
-    # Three searches but only one unique URL across them.
-    assert len([e for e in events if e["type"] == "search"]) == 3
-    assert len([e for e in events if e["type"] == "read"]) == 1
-    assert len(results) == 1
-
-
-async def _append_async(target: list, item):
-    """Helper used in the dedupe test where we want an async lambda."""
-    target.append(item)
-
-
-async def test_synthesize_research_passes_results_to_ai_and_returns_body(
-    _fake_search_client, _fake_ai,
-):
-    events: list[dict] = []
-
-    async def collect(e):
+    async def on_event(e):
         events.append(e)
 
     body, citations, spans = await web_search_loop.synthesize_research(
-        queries=["acme rebrand", "acme industry"],
+        queries=["ignored-by-hosted-search"],
         system_prompt="You are a researcher.",
         user_message="Research Acme.",
-        on_event=collect,
-        web_search_client=_fake_search_client,
+        on_event=on_event,
     )
 
-    # Body comes from the AI mock.
-    assert body.startswith("# Acme research")
-
-    # Citations are built from search results, numbered 1..N.
-    assert [c["id"] for c in citations] == [1, 2, 3]
-    assert [c["url"] for c in citations] == [
-        "https://example.com/acme-q3",
-        "https://example.com/acme-pr",
-        "https://example.com/industry",
-    ]
-    assert all(c["domain"] == "example.com" for c in citations)
-    assert all(c["cited_text"] == "" for c in citations)
-
-    # Spans intentionally empty (no streamed citation positions).
+    assert body == "research body"
     assert spans == []
-
-    # A trailing 'note' event is emitted before synthesis fires.
-    note_events = [e for e in events if e["type"] == "note"]
-    assert len(note_events) == 1
-    assert "3 search results" in note_events[0]["text"]
-
-    # The AI was called with the augmented prompt containing the search context.
-    call = _fake_ai.complete.await_args
-    prompt = call.kwargs["prompt"]
-    assert "Acme Q3 results" in prompt
-    assert "[1]" in prompt
-    assert "[3]" in prompt
-    assert call.kwargs["tier"] == Tier.BALANCED
-    assert call.kwargs["system"] == "You are a researcher."
-
-
-async def test_synthesize_research_empty_results_falls_back_to_llm_only(monkeypatch, _fake_ai):
-    """If Serper returns nothing, we still produce a body — flagged as LLM-only."""
-    client = MagicMock()
-    client.search = AsyncMock(return_value=[])
-
-    events: list[dict] = []
-
-    async def collect(e):
-        events.append(e)
-
-    body, citations, _ = await web_search_loop.synthesize_research(
-        queries=["q1", "q2"],
-        system_prompt="sys",
-        user_message="user",
-        on_event=collect,
-        web_search_client=client,
-    )
-
-    assert body  # AI still ran
     assert citations == []
-    # The 'note' event explicitly flags the no-results state.
-    note = next(e for e in events if e["type"] == "note")
-    assert "No search results" in note["text"]
-    # The augmented prompt warns the LLM not to fabricate.
-    prompt = _fake_ai.complete.await_args.kwargs["prompt"]
-    assert "do not fabricate" in prompt.lower() or "uncertain" in prompt.lower()
+
+    # AsyncAnthropic constructed with the right API key.
+    assert capture["client_kwargs"]["api_key"] == "sk-direct-test-key"
+
+    # Stream invoked with the hosted web_search tool + direct-API model ID.
+    s = capture["stream_kwargs"]
+    assert s["model"] == "claude-sonnet-4-6"  # bare ID, not "global.anthropic.*"
+    assert s["system"] == "You are a researcher."
+    assert s["messages"] == [{"role": "user", "content": "Research Acme."}]
+    assert s["tools"] == [{
+        "type": "web_search_20250305",
+        "name": "web_search",
+        "max_uses": 10,
+    }]
+
+    # Events flowed through process_stream to our callback.
+    assert any(e["type"] == "search" for e in events)
+    assert any(e["type"] == "read" for e in events)
 
 
-async def test_synthesize_research_skips_results_with_blank_url(monkeypatch, _fake_ai):
-    client = MagicMock()
-    client.search = AsyncMock(return_value=[
-        SearchResult(title="Real", url="https://example.com/real", snippet="x"),
-        SearchResult(title="Search not configured", url="", snippet="placeholder"),
-    ])
+async def test_synthesize_research_uses_heavy_tier_model_id_when_requested(monkeypatch):
+    """Tier.HEAVY must resolve to claude-opus-4-7 on the direct API."""
+    from app.core.config import Settings
+    fake_settings = Settings(ANTHROPIC_API_KEY="sk-test")
+    monkeypatch.setattr(web_search_loop, "get_settings", lambda: fake_settings)
 
-    events: list[dict] = []
+    capture: dict = {}
+    _install_fake_anthropic(monkeypatch, capture=capture)
+    _install_fake_process_stream(monkeypatch)
 
-    async def collect(e):
-        events.append(e)
-
-    body, citations, _ = await web_search_loop.synthesize_research(
-        queries=["q"],
-        system_prompt="sys",
-        user_message="user",
-        on_event=collect,
-        web_search_client=client,
+    await web_search_loop.synthesize_research(
+        queries=[],
+        system_prompt="s",
+        user_message="u",
+        on_event=lambda e: _noop(e),
+        tier=Tier.HEAVY,
     )
 
-    # Only the real result becomes a citation; the empty-URL row is skipped.
-    assert len(citations) == 1
-    assert citations[0]["url"] == "https://example.com/real"
-    assert body
+    assert capture["stream_kwargs"]["model"] == "claude-opus-4-7"
+
+
+async def test_synthesize_research_raises_without_api_key(monkeypatch):
+    """Without ANTHROPIC_API_KEY the call should fail fast with a clear error,
+    not silently fall through to garbage output."""
+    from app.core.config import Settings
+    fake_settings = Settings(ANTHROPIC_API_KEY="")
+    monkeypatch.setattr(web_search_loop, "get_settings", lambda: fake_settings)
+
+    with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+        await web_search_loop.synthesize_research(
+            queries=[],
+            system_prompt="s",
+            user_message="u",
+            on_event=lambda e: _noop(e),
+        )
+
+
+async def test_synthesize_research_respects_max_searches_override(monkeypatch):
+    """``max_searches`` propagates to the tool's max_uses field."""
+    from app.core.config import Settings
+    fake_settings = Settings(ANTHROPIC_API_KEY="sk-test")
+    monkeypatch.setattr(web_search_loop, "get_settings", lambda: fake_settings)
+
+    capture: dict = {}
+    _install_fake_anthropic(monkeypatch, capture=capture)
+    _install_fake_process_stream(monkeypatch)
+
+    await web_search_loop.synthesize_research(
+        queries=[],
+        system_prompt="s",
+        user_message="u",
+        on_event=lambda e: _noop(e),
+        max_searches=3,
+    )
+
+    assert capture["stream_kwargs"]["tools"][0]["max_uses"] == 3
+
+
+async def _noop(_e):
+    return None

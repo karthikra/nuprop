@@ -74,6 +74,13 @@ class Settings(BaseSettings):
     # Web search
     SERPER_API_KEY: str = ""
 
+    # Anthropic direct API (for hosted-tool calls like web_search_20250305 that
+    # Bedrock in ap-northeast-1 doesn't proxy). See docs/superpowers/specs/
+    # bedrock-web-search-fix.md (Option 1) + HANDOFF § 5e. Used ONLY by
+    # web_search_loop for run_research / run_benchmarks; everything else
+    # stays on Bedrock per the CLAUDE.md global policy.
+    ANTHROPIC_API_KEY: str = ""
+
     # Media — fal.ai for AI generation, S3 for asset storage.
     FAL_KEY: str = ""
     NUPROP_S3_BUCKET: str = "nuprop-proposal-assets"

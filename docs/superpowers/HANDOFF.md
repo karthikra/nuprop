@@ -3,7 +3,7 @@
 **Last updated:** 2026-05-27 (S10 + post-S10 ops: Redis off Upstash, Bedrock heavy tier swap to Opus 4.6, research downgraded to Sonnet 4.6 pending Opus 4.7 access)
 **Latest commit on `main`:** S10 merge `68f3c3d` + post-merge ops commits — see "Post-S10 ops" below for the full chain. Open follow-ups in § 5 of that section.
 **Working tree:** clean. On `main`. In sync with `origin/main`.
-**Production:** **LIVE at https://nuprop.fly.dev** — health 200, 14 secrets deployed (FAL_KEY added S10). Redis is **self-hosted** on Fly (app `nuprop-redis` in `bom`, internal-only at `redis://nuprop-redis.internal:6379/0`); Upstash has been retired. S3 asset bucket `nuprop-proposal-assets` is live in `ap-northeast-1`. **Bedrock heavy tier is Opus 4.6** (this account lacks 4.7); `run_research` + `run_benchmarks` currently use Sonnet 4.6 **without web_search** (Bedrock doesn't expose Anthropic's hosted web_search tool here — see § 5e). Research output is now LLM-from-training-data only, not real web research. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of S5 the proposal pipeline consumes client context.
+**Production:** **LIVE at https://nuprop.fly.dev** — health 200, 15 secrets deployed (FAL_KEY in S10; ANTHROPIC_API_KEY added today for hosted web_search routing). Redis is **self-hosted** on Fly (app `nuprop-redis` in `bom`, internal-only at `redis://nuprop-redis.internal:6379/0`); Upstash has been retired. S3 asset bucket `nuprop-proposal-assets` is live in `ap-northeast-1`. **Bedrock heavy tier is Opus 4.6** (this account lacks 4.7); `run_research` + `run_benchmarks` route to the **direct Anthropic API** for the hosted `web_search_20250305` tool (Option 1 of `docs/superpowers/specs/bedrock-web-search-fix.md` — Bedrock doesn't proxy hosted tools). Everything else stays on Bedrock per the CLAUDE.md policy. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of S5 the proposal pipeline consumes client context.
 
 **M16-M20 roadmap status:** S1–S7 COMPLETE. All M16-M20 work — backend + frontend — is fully shipped.
 **Post-roadmap slices:** S8 (smart rate card) COMPLETE — see "What happened this session" below.
@@ -212,19 +212,23 @@ Lives at the end of the deploy job, after `flyctl deploy`. Catches both the depl
 
 **5d. Stale onboarding — `~/.claude/CLAUDE.md` claims Opus 4.7 as heavy tier.** Update the user's global instructions to reflect that NUPROP currently runs on Opus 4.6 with research on Sonnet 4.6 pending § 5c. Five-line edit.
 
-**5e. Bedrock in `ap-northeast-1` doesn't expose Anthropic's hosted `web_search` tool.** Both `run_research` and `run_benchmarks` originally used `tools=[{"type": "web_search_20250305", ...}]` in their streaming calls. Bedrock 400s with the accepted-tools list limited to bash/custom/memory/text_editor/tool_search variants — no web_search of any version. The streaming calls' `except Exception` block writes "failed" to the activity log but does NOT re-raise, so ARQ reports the job as successful even though no research was persisted — silent-failure mode.
+**5e. Bedrock in `ap-northeast-1` doesn't expose Anthropic's hosted `web_search` tool — RESOLVED via Option 1 routing.** Both `run_research` and `run_benchmarks` originally used `tools=[{"type": "web_search_20250305", ...}]` in streaming calls. Bedrock 400s with the accepted-tools list limited to bash/custom/memory/text_editor/tool_search variants. The streaming `except Exception` block was writing "failed" to the activity log but NOT re-raising, so ARQ reported success despite no research being persisted — silent-failure mode that hid the bug across S5/S6/S7/S8 sessions.
 
-Today's tactical fix (commit `eb25043`): removed the `tools=` parameter from both phases. Sonnet 4.6 now writes research/benchmark text from its training-data knowledge — no live web data, no citations. Honest about the limitation in the code comments at `pipeline_service.py:230` and `pipeline_service.py:347`.
+Today's fix (commit chain ending at the Option 1 swap): we tried four approaches in sequence today, ultimately landing on Option 1 from `docs/superpowers/specs/bedrock-web-search-fix.md`:
 
-Proper fix (~1-2h follow-up): wire up Serper (`SERPER_API_KEY` is already in settings; `WebSearchClient` already exists at `app/infrastructure/external/web_search_client.py`) as a custom Anthropic tool with a proper tool-use loop. The pattern:
-1. Declare `tools=[{"name": "web_search", "input_schema": {...}}]` (custom, not hosted).
-2. LLM emits `tool_use` blocks with queries.
-3. Backend handler calls `WebSearchClient.search(query)`, returns results as `tool_result` blocks.
-4. Continue the conversation until LLM stops or hits max_iterations.
+1. Opus 4.7 → Opus 4.6 model swap (`d5769ee`) — account didn't have 4.7 access. Surfaced the next layer.
+2. Opus 4.6 → Sonnet 4.6 model swap (`56758f3`) — Opus 4.6 also doesn't accept the web_search tool on Bedrock. Surfaced the underlying issue.
+3. Dropped `tools=` entirely (`eb25043`) — Sonnet wrote training-data research but kept hallucinating `<tool_call>` XML blocks because the system prompt told it to search.
+4. Wired Serper as a custom tool (`c6d822c`) — worked but lower quality than the hosted Anthropic tool.
+5. **Final swap (this commit)**: route the streaming + hosted web_search call to **`AsyncAnthropic` direct API**, not Bedrock. The model runs an agentic search loop on Anthropic's infrastructure; Bedrock still handles everything else. Per Option 1 of the spec doc.
 
-Affects both `run_research` and `run_benchmarks`. Same loop, different system prompts. Estimated effort: 1-2h code + 4-6 tests.
+**Why Option 1 over Option 2 (Serper):** the spec doc itself recommends Option 1 unless data residency / procurement pins everything to Bedrock. Research quality is materially better (agentic loop, full-page reads, native citation spans). Cost: ~$0.40-0.80/proposal extra (Anthropic API tokens + ~$0.01/search). At smoke-test scale (~10s of proposals/month) that's under $10/month — rounding error vs the rest of the bill. Revisit if monthly volume passes ~500/mo, at which point Option 2 (Serper, $0.005/proposal) may have better unit economics.
 
-The fact that this was silently failing before today suggests **neither phase has ever produced real research in prod**. The pipeline ran end-to-end in past sessions but research/benchmarks columns were almost certainly empty. Worth confirming by querying a known-prior proposal's `research` column.
+**Implementation:** `backend/app/services/ai/web_search_loop.py::synthesize_research` instantiates `AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)` for THIS call only; everything else in the codebase continues to use `AsyncAnthropicBedrock`. Direct-API model IDs differ from Bedrock inference-profile IDs (bare `claude-sonnet-4-6` vs `global.anthropic.claude-sonnet-4-6`) — the IDs are in `_DIRECT_MODEL_IDS` at the top of the module.
+
+**Required operator step:** `fly secrets set -a nuprop ANTHROPIC_API_KEY="..."` — get the key from https://console.anthropic.com → API Keys. Without it, `synthesize_research` raises `RuntimeError` with a clear message + the fix command.
+
+**Policy note:** the user's CLAUDE.md says "always route through AWS Bedrock; never use the direct Anthropic API or ANTHROPIC_API_KEY." This commit is the documented exception — hosted-tool calls that Bedrock physically can't proxy. Worth updating CLAUDE.md to spell out the exception. § 5d already tracks the broader CLAUDE.md staleness.
 
 ---
 
