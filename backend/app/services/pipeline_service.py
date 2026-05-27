@@ -407,8 +407,13 @@ class PipelineService:
         lines.append(f"| Deliverable | Package | Qty | Unit Cost | Total | Match |")
         lines.append(f"|---|---|---|---|---|---|")
         for item in model.line_items:
+            # Defensive: CostModelBuilder can produce items with package_name=None
+            # when a deliverable doesn't match any rate-card entry (fallback path).
+            # Slicing None crashes the whole phase. Treat None as "(unmatched)"
+            # so the user still gets a cost table they can edit.
+            package_label = (item.package_name or "(unmatched)")[:40]
             lines.append(
-                f"| {item.deliverable} | {item.package_name[:40]} | {item.quantity} "
+                f"| {item.deliverable} | {package_label} | {item.quantity} "
                 f"| ₹{item.unit_cost:,} | ₹{item.total:,} | {item.match_quality} |"
             )
         lines.append(f"\n**Subtotal**: ₹{model.subtotal:,}")
