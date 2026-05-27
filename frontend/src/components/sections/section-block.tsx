@@ -6,6 +6,8 @@ import {
   useRefineSection,
 } from '../../api/proposals'
 import { SectionToolbar } from './section-toolbar'
+import { AssetRow } from './asset-row'
+import { AddImageMenu } from './add-image-menu'
 
 interface Props {
   proposalId: string
@@ -74,6 +76,13 @@ export function SectionBlock({ proposalId, type, title, section }: Props) {
         />
       ) : (
         <p className="text-sm text-stone-500 italic">Excluded from this proposal.</p>
+      )}
+
+      {included && (
+        <>
+          <AssetRow proposalId={proposalId} type={type} assets={section.assets ?? []} />
+          <AddImageMenu proposalId={proposalId} type={type} />
+        </>
       )}
 
       <div className="mt-3">

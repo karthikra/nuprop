@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     # Web search
     SERPER_API_KEY: str = ""
 
+    # Media — fal.ai for AI generation, S3 for asset storage.
+    FAL_KEY: str = ""
+    NUPROP_S3_BUCKET: str = "nuprop-proposal-assets"
+
     # Google OAuth (Gmail connector)
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""
