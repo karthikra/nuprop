@@ -92,4 +92,41 @@ describe('SectionBlock', () => {
     await user.click(screen.getByRole('button', { name: /exclude this section/i }))
     await waitFor(() => expect(screen.getByRole('button', { name: /re-include/i })).toBeInTheDocument())
   })
+
+  it('renders the asset row when section has assets', () => {
+    const withAssets = {
+      ...SAMPLE,
+      assets: [
+        {
+          id: 'a1',
+          kind: 'image' as const,
+          s3_key: 'agency-1/p1/a1.png',
+          url: 'https://s3.example/agency-1/p1/a1.png?signed=t',
+          caption: 'hero',
+          ai_generated: false,
+        },
+      ],
+    }
+    renderWithProviders(
+      <SectionBlock
+        proposalId="p1"
+        type="problem_statement"
+        title="Problem statement"
+        section={withAssets}
+      />,
+    )
+    expect(screen.getByRole('img')).toBeInTheDocument()
+  })
+
+  it('renders the add-image menu', () => {
+    renderWithProviders(
+      <SectionBlock
+        proposalId="p1"
+        type="problem_statement"
+        title="Problem statement"
+        section={SAMPLE}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /add image/i })).toBeInTheDocument()
+  })
 })
