@@ -1,6 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from './client'
-import type { Proposal, ProposalCreate, ProposalListItem, ChatMessage, Section, SectionType } from '../types/proposal'
+import type {
+  Proposal,
+  ProposalCreate,
+  ProposalListItem,
+  ChatMessage,
+  Section,
+  SectionAsset,
+  SectionType,
+} from '../types/proposal'
 
 export function useProposals(status?: string) {
   return useQuery({
@@ -181,6 +189,86 @@ export function useRefineSection(proposalId: string) {
         { instructions: vars.instructions },
       )
       return { type: vars.type, section: data }
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposals', proposalId] }),
+  })
+}
+
+export interface PresignedUpload {
+  upload_url: string
+  s3_key: string
+  asset_id: string
+}
+
+export function usePresignAsset(proposalId: string) {
+  return useMutation({
+    mutationFn: async (vars: {
+      type: SectionType
+      kind: 'image' | 'video' | 'audio'
+      filename: string
+      content_type: string
+      size: number
+    }) => {
+      const { type, ...body } = vars
+      const { data } = await api.post<PresignedUpload>(
+        `/proposals/${proposalId}/sections/${type}/assets/presign`,
+        body,
+      )
+      return data
+    },
+  })
+}
+
+export function useCommitAsset(proposalId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: {
+      type: SectionType
+      asset_id: string
+      s3_key: string
+      kind: 'image' | 'video' | 'audio'
+      content_type: string
+      caption: string | null
+      width: number | null
+      height: number | null
+    }) => {
+      const { type, ...body } = vars
+      const { data } = await api.post<SectionAsset>(
+        `/proposals/${proposalId}/sections/${type}/assets/commit`,
+        body,
+      )
+      return data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposals', proposalId] }),
+  })
+}
+
+export function useGenerateAsset(proposalId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: {
+      type: SectionType
+      kind: 'image' | 'video' | 'audio'
+      prompt: string
+    }) => {
+      const { type, ...body } = vars
+      const { data } = await api.post<SectionAsset>(
+        `/proposals/${proposalId}/sections/${type}/assets/generate`,
+        body,
+      )
+      return data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['proposals', proposalId] }),
+  })
+}
+
+export function useDeleteAsset(proposalId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: { type: SectionType; asset_id: string }) => {
+      await api.delete(
+        `/proposals/${proposalId}/sections/${vars.type}/assets/${vars.asset_id}`,
+      )
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['proposals', proposalId] }),
   })
