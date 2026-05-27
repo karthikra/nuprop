@@ -1,9 +1,9 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-27 (S10 image media shipped + Redis migrated off Upstash)
-**Latest commit on `main`:** `68f3c3d` (S10 merge). Pushed; auto-deploy triggered. Post-merge: Redis self-hosting on Fly + HANDOFF tidy commits on top — see "Post-S10 ops" below.
+**Last updated:** 2026-05-27 (S10 + post-S10 ops: Redis off Upstash, Bedrock heavy tier swap to Opus 4.6, research downgraded to Sonnet 4.6 pending Opus 4.7 access)
+**Latest commit on `main`:** S10 merge `68f3c3d` + post-merge ops commits — see "Post-S10 ops" below for the full chain. Open follow-ups in § 5 of that section.
 **Working tree:** clean. On `main`. In sync with `origin/main`.
-**Production:** **LIVE at https://nuprop.fly.dev** — health 200, 14 secrets deployed (FAL_KEY added S10). Redis is **self-hosted** on Fly (app `nuprop-redis` in `bom`, internal-only at `redis://nuprop-redis.internal:6379/0`); Upstash has been retired. S3 asset bucket `nuprop-proposal-assets` is live in `ap-northeast-1`. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of S5 the proposal pipeline consumes client context.
+**Production:** **LIVE at https://nuprop.fly.dev** — health 200, 14 secrets deployed (FAL_KEY added S10). Redis is **self-hosted** on Fly (app `nuprop-redis` in `bom`, internal-only at `redis://nuprop-redis.internal:6379/0`); Upstash has been retired. S3 asset bucket `nuprop-proposal-assets` is live in `ap-northeast-1`. **Bedrock heavy tier is Opus 4.6** (this AWS account lacks 4.7 access), and `run_research` currently uses Sonnet 4.6 because Opus 4.6 can't accept the `web_search` tool — both revert when Opus 4.7 access is granted. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of S5 the proposal pipeline consumes client context.
 
 **M16-M20 roadmap status:** S1–S7 COMPLETE. All M16-M20 work — backend + frontend — is fully shipped.
 **Post-roadmap slices:** S8 (smart rate card) COMPLETE — see "What happened this session" below.
@@ -129,9 +129,9 @@ Shipped **S10 — image media (upload + Nano Banana generation)**, the second sl
 
 ---
 
-## Post-S10 ops — Redis migrated off Upstash (2026-05-27)
+## Post-S10 ops (2026-05-27)
 
-After S10 merged, two ops issues surfaced during the smoke test and got resolved:
+After S10 merged, several ops issues surfaced during the smoke test. Most are resolved; a handful are pending follow-ups (see § 5 below).
 
 ### 1. Upstash Redis quota hit; migrated to self-hosted Fly Redis
 
@@ -166,9 +166,51 @@ The `migrate_redis_to_self_hosted.sh` script does this automatically as step 6. 
 
 **Permanent fix (not yet shipped):** Add a post-deploy step to `.github/workflows/deploy.yml` that ensures the worker process group is up. Half-day follow-up.
 
-### 3. Secondary observation — standby worker came online
+### 3. Bedrock Opus 4.7 access denied; research downgraded to Sonnet 4.6
+
+**Symptom 1 (resolved):** `run_research` raised `anthropic.PermissionDeniedError: 403 — anthropic.claude-opus-4-7 is not available for this account`. The AWS account has access to Opus 4.6 but not 4.7. Fix: switched `ANTHROPIC_OPUS_MODEL` in `app/core/config.py:55` from `global.anthropic.claude-opus-4-7` to `global.anthropic.claude-opus-4-6-v1` (verified via `aws bedrock list-inference-profiles --region ap-northeast-1` — the `-v1` suffix is part of the canonical ID).
+
+**Symptom 2 (resolved):** With Opus 4.6 in place, `run_research` then raised `anthropic.BadRequestError: 400 — tools.0: Input tag 'web_search_20250305' found using 'type' does not match any of the expected tags: …`. Opus 4.6 doesn't support the `web_search_20250305` tool (the tool was added in Anthropic's tool versioning after 4.6 shipped). Fix: switched `run_research` in `pipeline_service.py:232` from `Tier.HEAVY` (Opus) to `Tier.BALANCED` (Sonnet 4.6). `run_benchmarks` already uses Sonnet 4.6 + web_search successfully, so this is a known-good combo. Quality tradeoff is real — Sonnet does thinner agentic-loop research than Opus would — but unblocks the pipeline.
+
+**Revert path when Opus 4.7 access is granted:**
+1. AWS Console → Bedrock (`ap-northeast-1`) → Model access → enable Anthropic Claude Opus 4.7. Status: pending account allowlist.
+2. Once granted: revert `ANTHROPIC_OPUS_MODEL` in `app/core/config.py:55` to `global.anthropic.claude-opus-4-7`.
+3. Revert `pipeline_service.py:232` `Tier.BALANCED` → `Tier.HEAVY`.
+4. Update `tests/integration/test_research_transparency.py::test_run_research_uses_balanced_tier_pending_opus_4_7_access` — rename + flip the asserted tier.
+5. Drop the workaround comment from this section of HANDOFF.
+
+Also worth updating `~/.claude/CLAUDE.md` global instructions when reverting — they currently still claim Opus 4.7 as the heavy tier.
+
+### 4. Secondary observation — standby worker came online
 
 The Fly secret rotation brought the standby worker `865139be669de8` to `started` state alongside the primary. ARQ handles concurrent workers safely (Redis-backed per-job atomic claim), but it's mildly wasteful. Optional cleanup: `fly machine stop 865139be669de8 -a nuprop`. Not blocking — both workers polling the same queue is benign.
+
+### 5. Pending ops follow-ups
+
+Real bugs surfaced today that didn't get fixed in this session. All small. Worth landing as a single `chore(ops)` slice next session.
+
+**5a. ARQ `_job_id` retry trap.** Every pipeline phase that uses a deterministic `_job_id` (`{proposal_id}:{phase}`) silently no-ops on retry because ARQ checks for an existing result key under that ID and skips re-enqueue. Today's smoke test hit this on `run_research`: after the first 403, every retry attempt returned `200 OK` from the API but the worker never picked the job up because the result key from the failed run was still in Redis (24h TTL).
+
+- Manual workaround used today: `await r.delete(f"arq:result:{proposal_id}:{phase}")` via `fly ssh console` before re-triggering.
+- Fix candidates: (a) enqueue with a unique job_id (`{proposal_id}:{phase}:{uuid}`) — simplest, removes idempotency-on-retry but the gate-approval flow is already debounced at the UI layer; (b) call `arq_pool.enqueue_job(..., _job_id=...)` after explicit `del arq:result:<id>:<phase>` — keeps idempotency but adds a Redis round-trip per enqueue; (c) override `_result_ttl=0` on the failed-result path so it doesn't poison subsequent retries. **Recommend (a)** — simplest and matches how user-driven retries should work.
+- Affects every phase: `analyze_brief`, `run_research`, `run_benchmarks`, `build_cost_model`, `generate_sections`, `enrich_context_from_emails`. `analyze_brief` already uses unique job IDs (`{proposal_id}:analyze_brief:{uuid}` per the Redis keys), so it's exempt. Others use deterministic IDs and have the bug latent.
+- Estimated effort: ~30 min code + 2 tests.
+
+**5b. Fly worker-stop after secret changes — permanent fix.** Already documented in § 2 above as the workaround. The permanent fix is a post-deploy step in `.github/workflows/deploy.yml`:
+
+```yaml
+- name: Ensure worker process group is running
+  run: |
+    flyctl machine list -a nuprop --json \
+      | jq -r '.[] | select(.config.metadata.fly_process_group == "worker" and .state == "stopped") | .id' \
+      | xargs -r -I{} flyctl machine start {} -a nuprop
+```
+
+Lives at the end of the deploy job, after `flyctl deploy`. Catches both the deploy path AND any manual `fly secrets set` triggered redeploy. Estimated effort: ~10 min + manual verification.
+
+**5c. Opus 4.7 access in Bedrock — non-code AWS action.** See § 3 for the full revert path once access is granted. Open the AWS Console → Bedrock → Model access in `ap-northeast-1`. Some accounts get instant approval; new/cold accounts can take hours.
+
+**5d. Stale onboarding — `~/.claude/CLAUDE.md` claims Opus 4.7 as heavy tier.** Update the user's global instructions to reflect that NUPROP currently runs on Opus 4.6 with research on Sonnet 4.6 pending § 5c. Five-line edit.
 
 ---
 
