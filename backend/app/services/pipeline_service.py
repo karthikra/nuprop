@@ -188,7 +188,12 @@ class PipelineService:
         await self.session.commit()
         await self._emit_message(proposal_id, log_msg)
 
-        # 3. Streaming Opus 4.7 call with web_search.
+        # 3. Streaming Sonnet 4.6 call with web_search.
+        #
+        # Should be Opus 4.7 for agentic-loop quality, but: (a) this AWS account
+        # lacks 4.7 access (403), (b) Opus 4.6 doesn't accept the web_search_20250305
+        # tool. Sonnet 4.6 supports the tool and already powers run_benchmarks below.
+        # Revert to Tier.HEAVY when Opus 4.7 access is granted by AWS.
         flusher = ActivityFlusher(
             session=self.session,
             msg_repo=self.msg_repo,
@@ -229,7 +234,7 @@ class PipelineService:
         ai = get_ai_service()
         try:
             async with ai.client.messages.stream(
-                model=ai.model_for(Tier.HEAVY),     # Opus 4.7
+                model=ai.model_for(Tier.BALANCED),  # Sonnet 4.6 (see comment above)
                 max_tokens=4096,
                 system=system_prompt,
                 tools=[{

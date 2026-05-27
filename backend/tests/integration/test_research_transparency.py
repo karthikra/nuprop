@@ -125,7 +125,15 @@ async def test_run_research_emits_plan_activity_log_and_findings(db, monkeypatch
     assert "Acme rebranded in 2024." in refetched.research
 
 
-async def test_run_research_uses_opus_tier(monkeypatch, db, make_proposal_db):
+async def test_run_research_uses_balanced_tier_pending_opus_4_7_access(
+    monkeypatch, db, make_proposal_db,
+):
+    """Research currently uses Sonnet 4.6, not Opus, because:
+      (a) this AWS account lacks Opus 4.7 access (Bedrock 403),
+      (b) Opus 4.6 doesn't accept the web_search_20250305 tool (Bedrock 400).
+    Sonnet 4.6 supports web_search (same as run_benchmarks). When Opus 4.7
+    access is granted, flip this back to Tier.HEAVY in pipeline_service.run_research
+    and update this assertion."""
     _, _, proposal = await make_proposal_db(
         brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
         pipeline_state={"current_phase": "research", "phases_completed": []},
@@ -136,14 +144,14 @@ async def test_run_research_uses_opus_tier(monkeypatch, db, make_proposal_db):
     )
     mock_ai = MagicMock()
     mock_ai.client.messages.stream = MagicMock(return_value=_MockStreamContext([]))
-    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-opus-4-7")
+    mock_ai.model_for = MagicMock(return_value="global.anthropic.claude-sonnet-4-6")
     monkeypatch.setattr("app.services.pipeline_service.get_ai_service", lambda: mock_ai)
 
     svc = PipelineService(db, AsyncMock())
     await svc.run_research(proposal.id)
 
     from app.services.llm import Tier
-    mock_ai.model_for.assert_called_with(Tier.HEAVY)
+    mock_ai.model_for.assert_called_with(Tier.BALANCED)
 
 
 async def test_run_research_failure_marks_activity_log_failed_and_does_not_create_findings(
