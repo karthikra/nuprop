@@ -289,3 +289,119 @@ async def test_asset_endpoints_404_for_other_agency(client, _proposal, second_ag
         headers=rival,
     )
     assert delete.status_code == 404
+
+
+# ── New IDOR + validation coverage ──────────────────────────────────────────
+
+
+async def test_commit_rejects_s3_key_outside_proposal_prefix(client, _proposal):
+    """A crafted s3_key from another proposal/agency must be rejected."""
+    proposal, headers = _proposal
+    # First presign legitimately to get a valid asset_id shape.
+    r1 = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/presign",
+        headers=headers,
+        json={"kind": "image", "filename": "h.png", "content_type": "image/png", "size": 1024},
+    )
+    p = r1.json()
+    # Now commit with a foreign-prefixed s3_key.
+    r2 = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/commit",
+        headers=headers,
+        json={
+            "asset_id": p["asset_id"],
+            "s3_key": "other-agency-uuid/other-proposal-uuid/asset.png",
+            "kind": "image",
+            "content_type": "image/png",
+            "caption": None,
+            "width": None,
+            "height": None,
+        },
+    )
+    assert r2.status_code == 400
+    assert "does not belong" in r2.json()["detail"]
+
+
+async def test_commit_rejects_kind_mismatch_with_content_type(client, _proposal):
+    """Cannot commit kind=video with content_type=image/png."""
+    proposal, headers = _proposal
+    r1 = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/presign",
+        headers=headers,
+        json={"kind": "image", "filename": "h.png", "content_type": "image/png", "size": 1024},
+    )
+    p = r1.json()
+    r2 = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/commit",
+        headers=headers,
+        json={
+            "asset_id": p["asset_id"],
+            "s3_key": p["s3_key"],
+            "kind": "video",
+            "content_type": "image/png",
+            "caption": None,
+            "width": None,
+            "height": None,
+        },
+    )
+    assert r2.status_code == 400
+    assert "does not match" in r2.json()["detail"]
+
+
+async def test_commit_rejects_s3_key_ext_mismatch(client, _proposal):
+    """Cannot commit s3_key with .png ext but content_type=image/jpeg."""
+    proposal, headers = _proposal
+    r1 = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/presign",
+        headers=headers,
+        json={"kind": "image", "filename": "h.png", "content_type": "image/png", "size": 1024},
+    )
+    p = r1.json()
+    r2 = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/commit",
+        headers=headers,
+        json={
+            "asset_id": p["asset_id"],
+            "s3_key": p["s3_key"],   # ends with .png
+            "kind": "image",
+            "content_type": "image/jpeg",  # expects .jpg
+            "caption": None,
+            "width": None,
+            "height": None,
+        },
+    )
+    assert r2.status_code == 400
+    assert "s3_key extension" in r2.json()["detail"]
+
+
+async def test_delete_on_null_section_returns_404(client, _proposal, db):
+    """Section column NULL → 404 on delete (not 500)."""
+    proposal, headers = _proposal
+    # Wipe the section back to NULL so the not-current branch fires.
+    await ProposalRepository(db).update(proposal.id, problem_statement=None)
+    await db.commit()
+
+    r = await client.delete(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/any-id",
+        headers=headers,
+    )
+    assert r.status_code == 404
+
+
+async def test_generate_translates_fal_runtime_error_to_502(client, _proposal, monkeypatch):
+    """generate_image's RuntimeError must surface as a 502 (not a 500)."""
+    proposal, headers = _proposal
+
+    async def _fake_generate_image(*, prompt, agency_id, proposal_id):
+        raise RuntimeError("fal.ai endpoint fal-ai/nano-banana returned no images")
+
+    import app.views.v1.proposals as proposals_view
+    monkeypatch.setattr(proposals_view, "generate_image", _fake_generate_image, raising=False)
+
+    r = await client.post(
+        f"{API}/proposals/{proposal.id}/sections/problem_statement/assets/generate",
+        headers=headers,
+        json={"kind": "image", "prompt": "x"},
+    )
+    assert r.status_code == 502
+    assert "Image generation failed" in r.json()["detail"]

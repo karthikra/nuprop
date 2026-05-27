@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_agency_id
@@ -15,9 +15,11 @@ from app.domain.schemas.proposal_schemas import (
     ProposalUpdate,
 )
 from app.infrastructure.db.database import get_db
+from app.infrastructure.db.models.proposal import Proposal
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.services.media import _s3
 from app.services.media._common import (
+    ALLOWED_MIMES,
     build_s3_key,
     ext_from_mime,
     new_asset_id,
@@ -281,7 +283,7 @@ class PresignAssetBody(BaseModel):
     kind: str
     filename: str
     content_type: str
-    size: int
+    size: int = Field(gt=0)
 
 
 class CommitAssetBody(BaseModel):
@@ -296,7 +298,7 @@ class CommitAssetBody(BaseModel):
 
 class GenerateAssetBody(BaseModel):
     kind: str
-    prompt: str
+    prompt: str = Field(min_length=1)
 
 
 def _validate_section_type(section_type: str) -> None:
@@ -304,7 +306,7 @@ def _validate_section_type(section_type: str) -> None:
         raise HTTPException(status_code=400, detail=f"Unknown section type: {section_type}")
 
 
-async def _resolve_proposal(repo: ProposalRepository, proposal_id: UUID, agency_id: UUID):
+async def _resolve_proposal(repo: ProposalRepository, proposal_id: UUID, agency_id: UUID) -> Proposal:
     proposal = await repo.get_by_id(proposal_id)
     if not proposal or str(proposal.agency_id) != str(agency_id):
         raise HTTPException(status_code=404, detail="Proposal not found")
@@ -441,8 +443,30 @@ async def commit_asset(
     repo = ProposalRepository(db)
     proposal = await _resolve_proposal(repo, proposal_id, agency_id)
 
-    if body.kind not in ("image", "video", "audio"):
+    # ── Auth on the s3_key — it must belong to this proposal's prefix ────
+    expected_prefix = f"{proposal.agency_id}/{proposal.id}/"
+    if not body.s3_key.startswith(expected_prefix):
+        raise HTTPException(
+            status_code=400,
+            detail="s3_key does not belong to this proposal",
+        )
+
+    # ── Kind / mime consistency check (presign already validated, but the
+    # commit body is independent and may be malicious / out of sync) ─────
+    if body.kind not in ALLOWED_MIMES:
         raise HTTPException(status_code=400, detail=f"Unknown kind: {body.kind}")
+    if body.content_type not in ALLOWED_MIMES[body.kind]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"content_type {body.content_type!r} does not match kind {body.kind!r}",
+        )
+    # The s3_key must end with the canonical extension for body.content_type.
+    expected_ext = ext_from_mime(body.content_type)
+    if not expected_ext or not body.s3_key.endswith(f".{expected_ext}"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"s3_key extension does not match content_type {body.content_type!r}",
+        )
 
     asset: dict = {
         "id": body.asset_id,
@@ -485,11 +509,14 @@ async def generate_asset(
             detail=f"Generation for kind={body.kind!r} is not supported yet (S10 ships image only)",
         )
 
-    asset = await generate_image(
-        prompt=body.prompt,
-        agency_id=str(proposal.agency_id),
-        proposal_id=str(proposal.id),
-    )
+    try:
+        asset = await generate_image(
+            prompt=body.prompt,
+            agency_id=str(proposal.agency_id),
+            proposal_id=str(proposal.id),
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=f"Image generation failed: {e}") from e
     current = getattr(proposal, section_type)
     new_section = append_asset_to_section(current, asset)
     await repo.update(proposal_id, **{section_type: new_section})
@@ -520,9 +547,12 @@ async def delete_asset(
     if removed is None:
         raise HTTPException(status_code=404, detail="Asset not found")
 
-    await _s3.delete_object(removed["s3_key"])
+    # DB is source of truth — update + commit first; orphan S3 objects are
+    # garbage-collected by the bucket lifecycle, but a missing-but-listed
+    # asset shows up as a broken card to the user.
     await repo.update(proposal_id, **{section_type: new_section})
     await db.commit()
+    await _s3.delete_object(removed["s3_key"])
     return Response(status_code=204)
 
 
