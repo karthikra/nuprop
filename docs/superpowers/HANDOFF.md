@@ -1,13 +1,14 @@
 # NUPROP Session Handoff
 
-**Last updated:** 2026-05-26 (S9 section schema + editor shipped + deployed)
-**Latest commit on `main`:** `3e0e284` (S9 merge commit). Pushed; auto-deploy run triggered.
+**Last updated:** 2026-05-27 (S10 image media shipped)
+**Latest commit on `main`:** `<merge commit>` (S10 merge). Pushed; auto-deploy run triggered.
 **Working tree:** clean. On `main`. In sync with `origin/main`.
 **Production:** **LIVE at https://nuprop.fly.dev** — health 200, all 13 secrets deployed. Live features: rate-card wizard (onboarding step 2), Gmail client discovery (`/clients`), and as of this session the proposal pipeline now consumes client context (S5 — backend, not directly visible in the UI).
 
 **M16-M20 roadmap status:** S1–S7 COMPLETE. All M16-M20 work — backend + frontend — is fully shipped.
 **Post-roadmap slices:** S8 (smart rate card) COMPLETE — see "What happened this session" below.
 S9 (section schema + two-pass generation + editor) COMPLETE — see "What happened this session" below.
+S10 (image media — upload + Nano Banana generation) COMPLETE — see "What happened this session" below.
 
 ---
 
@@ -82,6 +83,49 @@ Check for leftover worktrees from this session: `git worktree list`. If `s5-pipe
 - **`sync_emails` is fine** — its 401→400 fix already shipped 2026-05-21.
 - **`pricing_model`** — S5 carries it in the merged config but `CostModelBuilder` doesn't branch on it (no alternative pricing path exists). If you want it to actually do something, that's a fresh design conversation: *what is the alternative pricing model?*
 - Other future-work items are listed in each slice's spec under "Future work".
+
+---
+
+## What happened this session (2026-05-27 — S10)
+
+Shipped **S10 — image media (upload + Nano Banana generation)**, the second slice of the S9-S13 section-redesign roadmap.
+
+### Architecture
+
+- **S3 bucket `nuprop-proposal-assets`** in `ap-northeast-1` — private, block-public-access on, CORS allows PUT/GET/HEAD from `https://nuprop.fly.dev` and `http://localhost:5173`, single tag-filtered lifecycle rule (`published=false` → expire 90d). Provisioned via `backend/scripts/bootstrap_s3.sh` (idempotent shell — no IaC anywhere else in the repo). **Note:** S10 doesn't yet stamp the `published=false` tag on uploads, so the rule no-ops until S12 wires tag-on-upload into commit/generate. Safe default for the pre-published-prod state.
+- **New media service package** at `backend/app/services/media/`: `_common.py` (kinds, mime/size caps, `Asset` TypedDict, key shape with regex-validated inputs as defence against path-traversal), `_s3.py` (cached boto3 client; presigned PUT 15min / GET 1h; async-offloaded upload/delete), `_fal.py` (async fal.ai wrapper — lazy import so test seam doesn't load `fal_client`), `image_gen.py` (Nano Banana → httpx download → S3 upload → `Asset`), `section_assets.py` (pure helpers: append/remove/resign — never mutates input).
+- **Four section-scoped asset endpoints** under `/api/v1/proposals/{id}/sections/{type}/assets/...`:
+  - `presign` — `{kind, filename, content_type, size}` → `{upload_url, s3_key, asset_id}`. Validates via `validate_upload`; 400 on oversize/wrong-mime/unknown-section.
+  - `commit` — records the just-uploaded asset on the section. **Three defence-in-depth checks**: `s3_key` prefix must equal `{agency_id}/{proposal_id}/` (closes IDOR via crafted key); `kind`/`content_type` must be consistent; `s3_key` extension must match `content_type`.
+  - `generate` — `kind=image` only in S10 (400 for video/audio; S11 widens). `RuntimeError` from fal.ai is translated to **502** (clean UX for content-policy blocks).
+  - `delete` — DB update + commit BEFORE S3 delete (DB is source of truth; orphan S3 objects are swept by the lifecycle rule once S12 enables tagging).
+- **Re-sign on read.** `_resign_response_sections` mutates the Pydantic `ProposalResponse` (NEVER the SA model — `get_db` commits on session exit, so mutating the row would persist the transient URL). Wired into `GET /proposals/{id}` and `PATCH /proposals/{id}`.
+- **Frontend:** new `AssetRow` (thumbnail grid + delete) and `AddImageMenu` (split-button: Upload file / Generate with AI) live under each `SectionBlock`, gated on `included=true`. Uploads go presign → bare `axios.put` direct to S3 (bypasses the wrapped api client's auth interceptor — S3 rejects `Authorization` headers) → commit. No bytes pass through Python on the upload path.
+
+### Test counts
+
+- Backend: `406 → 458` (+10 media-common base + 13 media-common hardening tests, +7 section-assets, +4 image-gen, +11 asset endpoints initial + 5 follow-up review tests, +1 re-sign-on-GET, +1 missing-section delete, +1 fal-502 translation).
+- Frontend: `265 → 275` (+5 asset-row, +3 add-image-menu, +2 section-block integration).
+- Migration head: `05_proposal_section_columns` (no schema change in S10).
+
+### Non-goals carried forward to S11+
+
+- Video + audio kinds — S11 widens `/assets/generate` and adds `+ Add video` / `+ Add audio` menus.
+- Video first-frame poster — optional in S11 spec.
+- `published=true` tagging on Publish (and the matching `published=false` tag-on-upload) — S12. Until then, lifecycle rule no-ops, assets stay forever.
+- NUSTAGE pull via `GET /export?token=…` — S12.
+
+### Known follow-ups (out of S10 scope)
+
+- **Lost-update race on the section JSON column.** Read-modify-write pattern in `commit_asset`/`generate_asset`/`delete_asset` (and pre-existing `patch_section`) is non-atomic. Two concurrent writes silently lose one. Fix candidates: optimistic concurrency via `updated_at`, `SELECT ... FOR UPDATE`, or Postgres `jsonb_set + ||` atomic append. Defer to a follow-up; affects S9 surface too.
+- **`AddImageMenu` dropdown click-outside-to-close** missing — open menu stays open until a choice is made.
+- **`URL.createObjectURL` revoke** is now wired in `readImageDimensions`, but the broader Upload flow doesn't revoke the original `file` reference if the upload errors after presign.
+
+### Operator steps needed before merge
+
+1. **Provision the bucket:** `AWS_PROFILE=nuprop bash backend/scripts/bootstrap_s3.sh` (idempotent; head-check first). Run from a workstation with IAM creds that can `s3:CreateBucket`, `s3:PutBucketCors`, `s3:PutBucketPublicAccessBlock`, `s3:PutLifecycleConfiguration`.
+2. **Push `FAL_KEY` to Fly:** `fly secrets set -a nuprop FAL_KEY="<key>"`. Get the key from https://fal.ai/dashboard. The app boots without it but `/generate` will 502 until the secret is set.
+3. **Verify the bucket region matches `AWS_REGION` (`ap-northeast-1`)** — Fly's app pool needs IAM creds with `s3:PutObject` / `s3:GetObject` / `s3:DeleteObject` on `arn:aws:s3:::nuprop-proposal-assets/*`. If not, attach a minimal policy.
 
 ---
 
