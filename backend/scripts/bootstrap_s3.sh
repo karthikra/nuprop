@@ -49,9 +49,19 @@ aws s3api put-bucket-cors --bucket "${BUCKET}" --cors-configuration '{
   ]
 }'
 
-# 4. Lifecycle — expire un-tagged objects after 90 days. S12 will tag
-#    assets that belong to a published proposal so they survive.
-echo "==> Setting lifecycle (90-day expiry on un-tagged objects)"
+# 4. Lifecycle — expire un-published assets after 90 days.
+#
+#    S3 lifecycle rules are evaluated as a union: if ANY rule matches an
+#    object, it expires. So this MUST be the only expiry rule, AND it MUST
+#    be filtered on a tag the app actually sets — never a bucket-wide
+#    prefix, or published assets would expire too.
+#
+#    S10 does not yet stamp the ``published=false`` tag on uploads. Until
+#    S12 wires tag-on-upload into commit/generate, the rule matches nothing
+#    and every asset stays forever. That's the safe default for the current
+#    pre-published-prod state (zero real proposals). When S12 ships, the
+#    existing rule catches new uploads with no further bucket changes.
+echo "==> Setting lifecycle (90-day expiry on published=false-tagged objects)"
 aws s3api put-bucket-lifecycle-configuration --bucket "${BUCKET}" --lifecycle-configuration '{
   "Rules": [
     {
@@ -61,13 +71,6 @@ aws s3api put-bucket-lifecycle-configuration --bucket "${BUCKET}" --lifecycle-co
         "Tag": {"Key": "published", "Value": "false"}
       },
       "Expiration": {"Days": 90}
-    },
-    {
-      "ID": "default-expire-untagged-after-90d",
-      "Status": "Enabled",
-      "Filter": {"Prefix": ""},
-      "Expiration": {"Days": 90},
-      "NoncurrentVersionExpiration": {"NoncurrentDays": 1}
     }
   ]
 }'
