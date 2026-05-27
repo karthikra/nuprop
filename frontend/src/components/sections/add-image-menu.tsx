@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import {
   useCommitAsset,
   useGenerateAsset,
@@ -19,7 +19,6 @@ export function AddImageMenu({ proposalId, type }: Props) {
   const [mode, setMode] = useState<'idle' | 'generate'>('idle')
   const [prompt, setPrompt] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
 
   const presign = usePresignAsset(proposalId)
   const commit = useCommitAsset(proposalId)
@@ -31,8 +30,6 @@ export function AddImageMenu({ proposalId, type }: Props) {
     setPrompt('')
     setError(null)
   }
-
-  const onPickFile = () => fileRef.current?.click()
 
   const onFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0]
@@ -46,17 +43,18 @@ export function AddImageMenu({ proposalId, type }: Props) {
     }
 
     try {
+      const contentType = f.type || 'image/png'
       const presigned = await presign.mutateAsync({
         type,
         kind: 'image',
         filename: f.name,
-        content_type: f.type || 'image/png',
+        content_type: contentType,
         size: f.size,
       })
 
       // Upload directly to S3 — bypass our backend.
       await axios.put(presigned.upload_url, f, {
-        headers: { 'Content-Type': f.type || 'image/png' },
+        headers: { 'Content-Type': contentType },
       })
 
       // Read dimensions before commit so the editor can use them.
@@ -67,7 +65,7 @@ export function AddImageMenu({ proposalId, type }: Props) {
         asset_id: presigned.asset_id,
         s3_key: presigned.s3_key,
         kind: 'image',
-        content_type: f.type || 'image/png',
+        content_type: contentType,
         caption: null,
         width: dims.width,
         height: dims.height,
@@ -111,13 +109,11 @@ export function AddImageMenu({ proposalId, type }: Props) {
           <label
             htmlFor={`upload-${type}`}
             className="block cursor-pointer rounded px-3 py-2 text-xs text-stone-700 hover:bg-stone-100"
-            onClick={onPickFile}
           >
             Upload file
           </label>
           <input
             id={`upload-${type}`}
-            ref={fileRef}
             type="file"
             accept="image/jpeg,image/png,image/webp,image/gif"
             className="sr-only"
@@ -177,10 +173,12 @@ export function AddImageMenu({ proposalId, type }: Props) {
 function readImageDimensions(file: File): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
     const img = new Image()
+    const objectUrl = URL.createObjectURL(file)
     let settled = false
     const done = (fn: () => void) => {
       if (settled) return
       settled = true
+      URL.revokeObjectURL(objectUrl)
       fn()
     }
     img.onload = () =>
@@ -189,6 +187,6 @@ function readImageDimensions(file: File): Promise<{ width: number; height: numbe
     // Fallback: jsdom / test environments may never fire Image events.
     // Don't block the upload flow waiting for dimensions.
     setTimeout(() => done(() => reject(new Error('image load timeout'))), 250)
-    img.src = URL.createObjectURL(file)
+    img.src = objectUrl
   })
 }
