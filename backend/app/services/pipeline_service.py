@@ -233,15 +233,18 @@ class PipelineService:
 
         ai = get_ai_service()
         try:
+            # NOTE: Anthropic's hosted web_search tool (type: web_search_20250305)
+            # is not available on AWS Bedrock in ap-northeast-1 — Bedrock returns
+            # 400 listing only bash/custom/memory/text_editor/tool_search as
+            # accepted tool types. Without tools, the model writes research from
+            # its training-data knowledge — no live web data, no citations.
+            # Honest about the limitation in the activity log; revisit when
+            # either (a) Bedrock exposes web_search, or (b) we wire up Serper
+            # as a custom tool with proper tool-use loop. See HANDOFF § 5e.
             async with ai.client.messages.stream(
-                model=ai.model_for(Tier.BALANCED),  # Sonnet 4.6 (see comment above)
+                model=ai.model_for(Tier.BALANCED),  # Sonnet 4.6
                 max_tokens=4096,
                 system=system_prompt,
-                tools=[{
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": 10,
-                }],
                 messages=[{"role": "user", "content": user_msg}],
             ) as stream:
                 body, citations, spans = await process_stream(stream, on_event=flusher.append)
@@ -341,15 +344,11 @@ class PipelineService:
 
         ai = get_ai_service()
         try:
+            # Same Bedrock web_search limitation as run_research — see HANDOFF § 5e.
             async with ai.client.messages.stream(
                 model=ai.model_for(Tier.BALANCED),     # Sonnet 4.6
                 max_tokens=4096,
                 system=system_prompt,
-                tools=[{
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": max_searches,
-                }],
                 messages=[{"role": "user", "content": user_msg}],
             ) as stream:
                 body, citations, spans = await process_stream(stream, on_event=flusher.append)
