@@ -17,6 +17,7 @@ from app.domain.schemas.proposal_schemas import (
 from app.infrastructure.db.database import get_db
 from app.infrastructure.db.models.proposal import Proposal
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+from app.infrastructure.queue.enqueue import enqueue_phase_job
 from app.services.media import _s3
 from app.services.media._common import (
     ALLOWED_MIMES,
@@ -32,7 +33,7 @@ from app.services.media.section_assets import (
     resign_assets,
 )
 from app.services.rate_card_excel_parser import MAX_BYTES, parse_and_extract
-from app.services.sections import FACT_SECTIONS, SECTION_ORDER, SYNTHESIS_SECTIONS
+from app.services.sections import FACT_SECTIONS, SECTION_ORDER
 from app.services.ai.section_facts import generate_fact_section
 from app.services.ai.section_synthesis import generate_synthesis_section
 from app.viewmodels.proposal_viewmodel import ProposalViewModel
@@ -185,7 +186,6 @@ async def fill_rate_card_gaps(
     await proposal_repo.update(proposal_id, rate_card_gaps=None)
     await db.commit()
 
-    from app.infrastructure.queue.enqueue import enqueue_phase_job
     await enqueue_phase_job(
         request.app.state.arq_pool,
         job_name="run_research",
@@ -212,7 +212,6 @@ async def skip_rate_card_gaps(
     await proposal_repo.update(proposal_id, rate_card_gaps=None)
     await db.commit()
 
-    from app.infrastructure.queue.enqueue import enqueue_phase_job
     await enqueue_phase_job(
         request.app.state.arq_pool,
         job_name="run_research",
@@ -280,7 +279,6 @@ async def confirm_rate_card_import(
     )
     await db.commit()
 
-    from app.infrastructure.queue.enqueue import enqueue_phase_job
     await enqueue_phase_job(
         request.app.state.arq_pool,
         job_name="run_research",

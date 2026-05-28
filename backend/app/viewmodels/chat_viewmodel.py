@@ -10,6 +10,7 @@ from app.domain.schemas.chat_schemas import ChatMessageResponse
 from app.infrastructure.db.models.chat_message import ChatMessage, MessageRole, MessageType
 from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+from app.infrastructure.queue.enqueue import enqueue_phase_job
 from app.services.ai.template_matcher import TemplateMatcher
 from app.viewmodels.shared.viewmodel import ViewModelBase
 
@@ -48,7 +49,6 @@ class ChatViewModel(ViewModelBase):
         See ``app.infrastructure.queue.enqueue`` for the full rationale on why
         the result-key DEL is needed before every enqueue.
         """
-        from app.infrastructure.queue.enqueue import enqueue_phase_job
         await enqueue_phase_job(
             self._request.app.state.arq_pool,
             job_name=job_name,

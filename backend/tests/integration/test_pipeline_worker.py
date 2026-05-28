@@ -10,7 +10,7 @@ defunct ``ResearchAgent.research_client`` agent method.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.workers import pipeline as worker

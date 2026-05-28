@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from app.core.config import get_settings
 from app.infrastructure.db.database import async_session_factory
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+from app.infrastructure.queue.enqueue import enqueue_phase_job
 from app.infrastructure.queue.events import publish
 from app.infrastructure.queue.redis import get_redis_settings
 from app.services.pipeline_service import PipelineService
@@ -75,7 +76,6 @@ async def _run_phase(ctx: dict, phase: str, proposal_id: str) -> None:
 
     next_phase = _NEXT_PHASE.get(phase)
     if next_phase:
-        from app.infrastructure.queue.enqueue import enqueue_phase_job
         await enqueue_phase_job(
             ctx["redis"],
             job_name=next_phase,
