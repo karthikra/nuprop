@@ -143,7 +143,6 @@ class CostModelBuilder:
                 multiplier_factor *= rush.get("value", 1.5)
                 multipliers_applied.append("urgency_rush")
 
-        budget_signal = brief.get("project", {}).get("budget_signal", "").lower()
         relationship = brief.get("context", {}).get("relationship", "")
         if relationship == "existing_client":
             existing = rate_card.get("multipliers", {}).get("existing_client", {})
