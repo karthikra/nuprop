@@ -11,7 +11,16 @@ from app.infrastructure.db.models.chat_message import ChatMessage, MessageRole, 
 from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.infrastructure.queue.enqueue import enqueue_phase_job
+from app.services.ai.chat_intent import PHASE_TO_JOB, classify_intent
 from app.services.ai.template_matcher import TemplateMatcher
+from app.services.cost_model_service import (
+    CostItemEditError,
+    apply_cost_item_edit,
+    find_line_item_index,
+)
+from app.services.llm import Tier, get_ai_service
+from app.services.sections import SECTION_ORDER
+from app.services.sections.regeneration import regenerate_section_content
 from app.viewmodels.shared.viewmodel import ViewModelBase
 
 
@@ -131,8 +140,14 @@ class ChatViewModel(ViewModelBase):
             self.status_code = 201
             return [user_msg]
 
-        # non-brief phases: unchanged echo placeholder, returned synchronously
-        assistant_msg = await self._echo_response(proposal_id, content, current_phase)
+        # Non-brief phases: classify the message (Path B) and route it.
+        await ws_manager.broadcast(str(proposal_id), {"type": "typing", "typing": True})
+        intent = await classify_intent(
+            user_message=content,
+            current_phase=current_phase,
+            proposal_state_hint=self._intent_hint(proposal),
+        )
+        assistant_msg = await self._dispatch_intent(proposal, intent, current_phase)
         await self._broadcast_msg(proposal_id, assistant_msg)
         self.status_code = 201
         return [user_msg, assistant_msg]
@@ -344,3 +359,104 @@ class ChatViewModel(ViewModelBase):
             content=text,
             phase=phase,
         )
+
+    # ── Path B: intent dispatch ───────────────────────────────────────────────
+    def _intent_hint(self, proposal) -> dict:
+        cost = proposal.cost_model or {}
+        items = cost.get("line_items") or []
+        return {
+            "section_types": list(SECTION_ORDER),
+            "cost_items": [
+                str(i.get("deliverable", "")) for i in items if i.get("deliverable")
+            ],
+        }
+
+    async def _ack(self, proposal_id, text: str, phase: str) -> ChatMessage:
+        return await self._echo_response(proposal_id, "", phase, override_text=text)
+
+    async def _dispatch_intent(self, proposal, intent, current_phase) -> ChatMessage:
+        kind = intent.get("kind", "unknown")
+        proposal_id = proposal.id
+
+        if kind == "re_run_phase":
+            job = PHASE_TO_JOB[intent["phase"]]
+            pipeline = await self._set_job_queued(proposal, job)
+            await self.proposal_repo.update(proposal_id, pipeline_state=pipeline)
+            await self._db.commit()  # commit before enqueue so the worker sees queued state
+            await self._enqueue(job, proposal_id)
+            label = intent["phase"].replace("_", " ")
+            return await self._ack(proposal_id, f"Re-running {label}…", current_phase)
+
+        if kind in ("regenerate_section", "refine_section"):
+            section_type = intent["section_type"]
+            instructions = intent.get("instructions") if kind == "refine_section" else None
+            new_payload = await regenerate_section_content(
+                proposal, section_type, instructions, self._db,
+            )
+            current = getattr(proposal, section_type, None) or {}
+            new_payload["assets"] = current.get("assets", [])
+            await self.proposal_repo.update(proposal_id, **{section_type: new_payload})
+            await self._db.commit()
+            label = section_type.replace("_", " ")
+            verb = "Refining" if kind == "refine_section" else "Regenerating"
+            return await self._ack(proposal_id, f"{verb} {label}…", current_phase)
+
+        if kind == "edit_cost_item":
+            cost = proposal.cost_model or {}
+            idx = find_line_item_index(cost, intent["deliverable"])
+            if idx is None:
+                return await self._ack(
+                    proposal_id,
+                    f'I couldn\'t find a cost item called "{intent["deliverable"]}".',
+                    current_phase,
+                )
+            try:
+                updated = apply_cost_item_edit(
+                    cost, index=idx, field=intent["field"], value=intent["value"],
+                )
+            except CostItemEditError:
+                return await self._ack(
+                    proposal_id, "I couldn't apply that cost-model edit.", current_phase,
+                )
+            await self.proposal_repo.update(proposal_id, cost_model=updated)
+            await self._db.commit()
+            await ws_manager.broadcast(
+                str(proposal_id), {"type": "cost_model_update", "cost_model": updated},
+            )
+            label = intent["field"].replace("_", " ")
+            return await self._ack(
+                proposal_id, f"Updated {label} for {intent['deliverable']}.", current_phase,
+            )
+
+        if kind == "ask_question":
+            answer = await self._answer_question(proposal, intent["question"])
+            return await self._ack(proposal_id, answer, current_phase)
+
+        # unknown
+        return await self._echo_response(
+            proposal_id, "", current_phase,
+            override_text=(
+                "I can re-run a phase (research, benchmarks, cost model, sections), "
+                "regenerate or refine a section, edit a cost item, or answer questions "
+                'about your proposal. Try: "redo research" or '
+                '"regenerate the problem statement".'
+            ),
+        )
+
+    async def _answer_question(self, proposal, question: str) -> str:
+        context = (
+            f"Project: {proposal.project_name}\n"
+            f"Brief: {proposal.brief or {}}\n"
+            f"Cost model: {proposal.cost_model or {}}\n"
+        )
+        result = await get_ai_service().complete(
+            f"Answer the user's question about this proposal concisely.\n\n"
+            f"{context}\nQuestion: {question}",
+            tier=Tier.BALANCED,
+            system=(
+                "You are a helpful proposal assistant. Answer in 1-3 sentences "
+                "using only the provided context."
+            ),
+            max_tokens=400,
+        )
+        return result.text
