@@ -13,7 +13,7 @@ can never 500 the chat send or trigger the wrong action.
 from __future__ import annotations
 
 import logging
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from app.services.llm import Tier, get_ai_service
 
@@ -73,6 +73,7 @@ Examples:
 "run the benchmark again" -> {"kind":"re_run_phase","phase":"benchmarks","confidence":0.95}
 "regenerate the problem statement" -> {"kind":"regenerate_section","section_type":"problem_statement","confidence":0.95}
 "make the cover page punchier" -> {"kind":"refine_section","section_type":"cover_page","instructions":"make it punchier","confidence":0.9}
+"rewrite the cover page with a friendlier tone" -> {"kind":"refine_section","section_type":"cover_page","instructions":"friendlier tone","confidence":0.88}
 "change the Logo quantity to 3" -> {"kind":"edit_cost_item","deliverable":"Logo","field":"quantity","value":3,"confidence":0.93}
 "what's my grand total?" -> {"kind":"ask_question","question":"what's my grand total?","confidence":0.85}
 "asdfgh" -> {"kind":"unknown","confidence":0.0}
@@ -83,7 +84,7 @@ async def classify_intent(
     *,
     user_message: str,
     current_phase: str,
-    proposal_state_hint: dict,
+    proposal_state_hint: dict[str, Any],
 ) -> Intent:
     """Single Haiku call. Returns a normalized Intent; never raises."""
     section_types = proposal_state_hint.get("section_types") or []
@@ -122,19 +123,23 @@ async def classify_intent(
 
     if kind == "re_run_phase" and raw.get("phase") not in PHASE_TO_JOB:
         return _unknown()
-    if kind in ("regenerate_section", "refine_section") and not raw.get("section_type"):
-        return _unknown()
-    if kind == "refine_section" and not raw.get("instructions"):
-        return _unknown()
+    if kind in ("regenerate_section", "refine_section"):
+        if not isinstance(raw.get("section_type"), str) or not raw.get("section_type"):
+            return _unknown()
+    if kind == "refine_section":
+        if not isinstance(raw.get("instructions"), str) or not raw.get("instructions"):
+            return _unknown()
     if kind == "edit_cost_item":
         if raw.get("field") not in _VALID_COST_FIELDS:
             return _unknown()
-        if not isinstance(raw.get("value"), int) or isinstance(raw.get("value"), bool):
+        value = raw.get("value")
+        if not isinstance(value, int) or isinstance(value, bool):
             return _unknown()
-        if not raw.get("deliverable"):
+        if not isinstance(raw.get("deliverable"), str) or not raw.get("deliverable"):
             return _unknown()
-    if kind == "ask_question" and not raw.get("question"):
-        return _unknown()
+    if kind == "ask_question":
+        if not isinstance(raw.get("question"), str) or not raw.get("question"):
+            return _unknown()
 
     intent: Intent = {"kind": kind, "confidence": confidence}
     for f in ("phase", "section_type", "instructions", "deliverable", "field", "value", "question"):

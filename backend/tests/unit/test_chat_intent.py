@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.services.ai import chat_intent
 from app.services.ai.chat_intent import Intent, classify_intent
 
 
@@ -117,4 +116,20 @@ async def test_llm_exception_becomes_unknown(monkeypatch):
     intent = await classify_intent(
         user_message="x", current_phase="research", proposal_state_hint=_hint(),
     )
+    assert intent["kind"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_non_string_section_type_becomes_unknown(monkeypatch):
+    intent = await _run(monkeypatch, {
+        "kind": "regenerate_section", "section_type": 42, "confidence": 0.9,
+    })
+    assert intent["kind"] == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_non_string_question_becomes_unknown(monkeypatch):
+    intent = await _run(monkeypatch, {
+        "kind": "ask_question", "question": ["not", "a", "string"], "confidence": 0.9,
+    })
     assert intent["kind"] == "unknown"
