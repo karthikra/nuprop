@@ -185,9 +185,11 @@ async def fill_rate_card_gaps(
     await proposal_repo.update(proposal_id, rate_card_gaps=None)
     await db.commit()
 
-    pool = request.app.state.arq_pool
-    await pool.enqueue_job(
-        "run_research", str(proposal_id), _job_id=f"{proposal_id}:run_research"
+    from app.infrastructure.queue.enqueue import enqueue_phase_job
+    await enqueue_phase_job(
+        request.app.state.arq_pool,
+        job_name="run_research",
+        proposal_id=str(proposal_id),
     )
     return {"ok": True}
 
@@ -210,9 +212,11 @@ async def skip_rate_card_gaps(
     await proposal_repo.update(proposal_id, rate_card_gaps=None)
     await db.commit()
 
-    pool = request.app.state.arq_pool
-    await pool.enqueue_job(
-        "run_research", str(proposal_id), _job_id=f"{proposal_id}:run_research"
+    from app.infrastructure.queue.enqueue import enqueue_phase_job
+    await enqueue_phase_job(
+        request.app.state.arq_pool,
+        job_name="run_research",
+        proposal_id=str(proposal_id),
     )
     return Response(status_code=204)
 
@@ -276,9 +280,11 @@ async def confirm_rate_card_import(
     )
     await db.commit()
 
-    await request.app.state.arq_pool.enqueue_job(
-        "run_research", str(proposal_id),
-        _job_id=f"{proposal_id}:run_research",
+    from app.infrastructure.queue.enqueue import enqueue_phase_job
+    await enqueue_phase_job(
+        request.app.state.arq_pool,
+        job_name="run_research",
+        proposal_id=str(proposal_id),
     )
     return {"ok": True}
 

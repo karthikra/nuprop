@@ -118,3 +118,28 @@ async def test_task_marks_failed_and_emits_pipeline_error_on_exception(db, monke
     assert calls, "expected a publish() call for the pipeline_error event"
     # Subsequent phase should NOT be enqueued on failure
     ctx["redis"].enqueue_job.assert_not_called()
+
+
+async def test_chain_enqueue_clears_stale_result_key_before_enqueueing_next_phase(
+    db, monkeypatch, make_proposal_db
+):
+    """Regression for the worker chain (run_research -> run_benchmarks ->
+    build_cost_model). A failed prior run on the SAME _job_id leaves a
+    poisoned arq:result key (24h TTL). The chain MUST DEL it before
+    enqueueing the next phase so re-runs aren't silently swallowed."""
+    _, _, proposal = await make_proposal_db(
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
+    )
+    pid = str(proposal.id)
+
+    _patch_research_pipeline(monkeypatch, body="Acme research summary.")
+
+    ctx = _ctx()
+    await worker.run_research(ctx, pid)
+
+    redis = ctx["redis"]
+    # The next phase's result-cache key is DEL'd before the chained enqueue.
+    redis.delete.assert_awaited_once_with(f"arq:result:{pid}:run_benchmarks")
+    redis.enqueue_job.assert_awaited_once()
+    assert redis.enqueue_job.await_args.args[0] == "run_benchmarks"

@@ -75,8 +75,11 @@ async def _run_phase(ctx: dict, phase: str, proposal_id: str) -> None:
 
     next_phase = _NEXT_PHASE.get(phase)
     if next_phase:
-        await ctx["redis"].enqueue_job(
-            next_phase, proposal_id, _job_id=f"{proposal_id}:{next_phase}"
+        from app.infrastructure.queue.enqueue import enqueue_phase_job
+        await enqueue_phase_job(
+            ctx["redis"],
+            job_name=next_phase,
+            proposal_id=str(proposal_id),
         )
 
 
