@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
@@ -139,7 +140,7 @@ async def retry_failed_phase(
 
 class UpdateCostItemRequest(BaseModel):
     index: int
-    field: str  # "quantity" | "unit_cost"
+    field: Literal["quantity", "unit_cost"]
     value: int
 
 

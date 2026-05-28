@@ -230,7 +230,7 @@ async def test_ask_question_answers_with_assistant_text(
     })
     import app.viewmodels.chat_viewmodel as vm
     fake = AsyncMock(return_value=type("R", (), {"text": "Your total is Rs.1,18,000."})())
-    monkeypatch.setattr(vm, "get_ai_service", lambda: AsyncMock(complete=fake), raising=False)
+    monkeypatch.setattr(vm, "get_ai_service", lambda: AsyncMock(complete=fake))
     p = await make_proposal_api(client, registered.headers)
     await _move_out_of_brief(client, registered.headers, p["id"])
     resp = await client.post(
@@ -240,3 +240,21 @@ async def test_ask_question_answers_with_assistant_text(
     assert resp.status_code == 201
     text = " ".join((m.get("content") or "") for m in resp.json()).lower()
     assert "total" in text
+
+
+@pytest.mark.asyncio
+async def test_ask_question_llm_failure_degrades_gracefully(
+    client, registered, make_proposal_api, monkeypatch,
+):
+    _patch_intent(monkeypatch, {"kind": "ask_question", "question": "x?", "confidence": 0.8})
+    import app.viewmodels.chat_viewmodel as vm
+    failing = AsyncMock(side_effect=RuntimeError("bedrock throttled"))
+    monkeypatch.setattr(vm, "get_ai_service", lambda: AsyncMock(complete=failing))
+    p = await make_proposal_api(client, registered.headers)
+    await _move_out_of_brief(client, registered.headers, p["id"])
+    resp = await client.post(
+        f"{API}/chat/{p['id']}/send", headers=registered.headers, json={"content": "x?"},
+    )
+    assert resp.status_code == 201  # graceful, not 500
+    text = " ".join((m.get("content") or "") for m in resp.json()).lower()
+    assert "couldn't answer" in text or "could not answer" in text or "try again" in text

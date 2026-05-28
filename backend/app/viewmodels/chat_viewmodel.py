@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import Request
@@ -22,6 +23,8 @@ from app.services.llm import Tier, get_ai_service
 from app.services.sections import SECTION_ORDER
 from app.services.sections.regeneration import regenerate_section_content
 from app.viewmodels.shared.viewmodel import ViewModelBase
+
+logger = logging.getLogger(__name__)
 
 
 class ChatViewModel(ViewModelBase):
@@ -455,14 +458,18 @@ class ChatViewModel(ViewModelBase):
             f"Brief: {proposal.brief or {}}\n"
             f"Cost model: {proposal.cost_model or {}}\n"
         )
-        result = await get_ai_service().complete(
-            f"Answer the user's question about this proposal concisely.\n\n"
-            f"{context}\nQuestion: {question}",
-            tier=Tier.BALANCED,
-            system=(
-                "You are a helpful proposal assistant. Answer in 1-3 sentences "
-                "using only the provided context."
-            ),
-            max_tokens=400,
-        )
-        return result.text
+        try:
+            result = await get_ai_service().complete(
+                f"Answer the user's question about this proposal concisely.\n\n"
+                f"{context}\nQuestion: {question}",
+                tier=Tier.BALANCED,
+                system=(
+                    "You are a helpful proposal assistant. Answer in 1-3 sentences "
+                    "using only the provided context."
+                ),
+                max_tokens=400,
+            )
+            return result.text
+        except Exception:  # noqa: BLE001 — never 500 the chat send
+            logger.exception("ask_question LLM call failed")
+            return "I couldn't answer that right now — please try again in a moment."

@@ -45,6 +45,21 @@ def test_edit_exact_gst_and_grand_total():
     assert out["grand_total"] == 472000
 
 
+def test_discount_percent_is_applied_before_gst():
+    model = {
+        "line_items": [{"deliverable": "Logo", "quantity": 1, "unit_cost": 100000, "total": 100000}],
+        "discount_percent": 10,
+    }
+    out = apply_cost_item_edit(model, index=0, field="quantity", value=2)
+    # subtotal 200000; 10% discount => discount_amount 20000; total 180000;
+    # gst 18% of 180000 = 32400; grand_total 212400
+    assert out["subtotal"] == 200000
+    assert out["discount_amount"] == 20000
+    assert out["total"] == 180000
+    assert out["gst_amount"] == 32400
+    assert out["grand_total"] == 212400
+
+
 def test_invalid_field_raises():
     with pytest.raises(CostItemEditError):
         apply_cost_item_edit(_model(), index=0, field="color", value=3)
