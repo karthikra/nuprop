@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useChatStore } from '../stores/chat-store'
-import type { WSMessage } from '../types/proposal'
+import type { JobStatus, WSMessage } from '../types/proposal'
 
 export function useProposalWebSocket(proposalId: string | undefined) {
   const addMessage = useChatStore((s) => s.addMessage)
@@ -10,6 +10,7 @@ export function useProposalWebSocket(proposalId: string | undefined) {
   const setTyping = useChatStore((s) => s.setTyping)
   const setIdeationTyping = useChatStore((s) => s.setIdeationTyping)
   const updateProgress = useChatStore((s) => s.updateProgress)
+  const setJobStatus = useChatStore((s) => s.setJobStatus)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -72,6 +73,13 @@ export function useProposalWebSocket(proposalId: string | undefined) {
               status: (data.status as 'searching' | 'complete' | 'error') || 'searching',
               detail: data.detail || '',
             })
+          } else if (data.type === 'job_status' && data.phase && data.state) {
+            setJobStatus({
+              phase: data.phase,
+              state: data.state as JobStatus['state'],
+              error: data.error ?? null,
+              updated_at: data.updated_at,
+            })
           } else if (data.type === 'pipeline_error') {
             // Observability only — the user-facing error message arrives as a separate
             // new_message event with role=system + extra_data.kind=error.
@@ -100,5 +108,5 @@ export function useProposalWebSocket(proposalId: string | undefined) {
       }
       setConnected(false)
     }
-  }, [proposalId, addMessage, updateMessage, setPipelinePhase, setConnected, setTyping, setIdeationTyping, updateProgress])
+  }, [proposalId, addMessage, updateMessage, setPipelinePhase, setConnected, setTyping, setIdeationTyping, updateProgress, setJobStatus])
 }

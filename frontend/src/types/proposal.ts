@@ -87,8 +87,15 @@ export interface ChatMessage {
   created_at: string
 }
 
+export interface JobStatus {
+  phase: string
+  state: 'queued' | 'running' | 'complete' | 'failed'
+  error?: string | null
+  updated_at?: string
+}
+
 export interface WSMessage {
-  type: 'new_message' | 'message_updated' | 'phase_change' | 'typing' | 'progress' | 'pong' | 'error' | 'pipeline_error'
+  type: 'new_message' | 'message_updated' | 'phase_change' | 'typing' | 'progress' | 'pong' | 'error' | 'pipeline_error' | 'job_status'
   message?: ChatMessage
   phase?: string
   typing?: boolean
@@ -99,6 +106,8 @@ export interface WSMessage {
   status?: string
   detail?: string
   error?: string
+  state?: string
+  updated_at?: string
 }
 
 export interface ProgressItem {

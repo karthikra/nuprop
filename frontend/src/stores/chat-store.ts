@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ChatMessage, ProgressItem } from '../types/proposal'
+import type { ChatMessage, JobStatus, ProgressItem } from '../types/proposal'
 
 interface ChatState {
   messages: ChatMessage[]
@@ -10,6 +10,7 @@ interface ChatState {
   isTyping: boolean
   isIdeationTyping: boolean
   progress: ProgressItem[]
+  jobStatus: JobStatus | null
 
   setMessages: (msgs: ChatMessage[]) => void
   addMessage: (msg: ChatMessage) => void
@@ -21,6 +22,7 @@ interface ChatState {
   setTyping: (typing: boolean) => void
   setIdeationTyping: (typing: boolean) => void
   updateProgress: (item: ProgressItem) => void
+  setJobStatus: (s: JobStatus | null) => void
   reset: () => void
 }
 
@@ -33,6 +35,7 @@ export const useChatStore = create<ChatState>((set) => ({
   isTyping: false,
   isIdeationTyping: false,
   progress: [],
+  jobStatus: null,
 
   setMessages: (msgs) => set({ messages: msgs }),
 
@@ -85,8 +88,10 @@ export const useChatStore = create<ChatState>((set) => ({
       return { progress: [...state.progress, item] }
     }),
 
+  setJobStatus: (s) => set({ jobStatus: s }),
+
   reset: () => set({
     messages: [], ideationMessages: [], pipelinePhase: 'brief', isConnected: false,
-    isSending: false, isTyping: false, isIdeationTyping: false, progress: [],
+    isSending: false, isTyping: false, isIdeationTyping: false, progress: [], jobStatus: null,
   }),
 }))
