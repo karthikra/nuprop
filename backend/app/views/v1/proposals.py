@@ -17,6 +17,7 @@ from app.domain.schemas.proposal_schemas import (
 from app.infrastructure.db.database import get_db
 from app.infrastructure.db.models.proposal import Proposal
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+from app.infrastructure.queue.enqueue import enqueue_phase_job
 from app.services.media import _s3
 from app.services.media._common import (
     ALLOWED_MIMES,
@@ -32,9 +33,8 @@ from app.services.media.section_assets import (
     resign_assets,
 )
 from app.services.rate_card_excel_parser import MAX_BYTES, parse_and_extract
-from app.services.sections import FACT_SECTIONS, SECTION_ORDER, SYNTHESIS_SECTIONS
-from app.services.ai.section_facts import generate_fact_section
-from app.services.ai.section_synthesis import generate_synthesis_section
+from app.services.sections import SECTION_ORDER
+from app.services.sections.regeneration import regenerate_section_content
 from app.viewmodels.proposal_viewmodel import ProposalViewModel
 from app.viewmodels.rate_card_viewmodel import RateCardViewModel
 
@@ -185,9 +185,10 @@ async def fill_rate_card_gaps(
     await proposal_repo.update(proposal_id, rate_card_gaps=None)
     await db.commit()
 
-    pool = request.app.state.arq_pool
-    await pool.enqueue_job(
-        "run_research", str(proposal_id), _job_id=f"{proposal_id}:run_research"
+    await enqueue_phase_job(
+        request.app.state.arq_pool,
+        job_name="run_research",
+        proposal_id=str(proposal_id),
     )
     return {"ok": True}
 
@@ -210,9 +211,10 @@ async def skip_rate_card_gaps(
     await proposal_repo.update(proposal_id, rate_card_gaps=None)
     await db.commit()
 
-    pool = request.app.state.arq_pool
-    await pool.enqueue_job(
-        "run_research", str(proposal_id), _job_id=f"{proposal_id}:run_research"
+    await enqueue_phase_job(
+        request.app.state.arq_pool,
+        job_name="run_research",
+        proposal_id=str(proposal_id),
     )
     return Response(status_code=204)
 
@@ -276,9 +278,10 @@ async def confirm_rate_card_import(
     )
     await db.commit()
 
-    await request.app.state.arq_pool.enqueue_job(
-        "run_research", str(proposal_id),
-        _job_id=f"{proposal_id}:run_research",
+    await enqueue_phase_job(
+        request.app.state.arq_pool,
+        job_name="run_research",
+        proposal_id=str(proposal_id),
     )
     return {"ok": True}
 
@@ -597,37 +600,14 @@ async def _generate_section(
     refine_instructions: str | None,
     db: AsyncSession,
 ) -> dict:
-    """Single-section dispatch shared by /regenerate and /refine."""
-    from sqlalchemy import select
-    from app.infrastructure.db.models.agency import Agency
+    """Single-section dispatch shared by /regenerate and /refine.
 
-    agency_row = await db.execute(select(Agency).where(Agency.id == proposal.agency_id))
-    agency = agency_row.scalar_one()
-
-    if section_type in FACT_SECTIONS:
-        return await generate_fact_section(
-            section_type=section_type,
-            brief=proposal.brief or {},
-            research=proposal.research,
-            cost_model=proposal.cost_model or {},
-            template_config=None,
-            context_brief=proposal.context_brief,
-            agency_name=agency.name,
-            refine_instructions=refine_instructions,
-        )
-    # Synthesis section — rebuild pass1_sections dict from current proposal columns.
-    # Include executive_summary AND fact sections (everything except the section being
-    # regenerated, to avoid stale self-reference).
-    pass1_sections = {
-        s: getattr(proposal, s) or {}
-        for s in SECTION_ORDER
-        if s != section_type
-    }
-    return await generate_synthesis_section(
-        section_type=section_type,
-        brief=proposal.brief or {},
-        pass1_sections=pass1_sections,
-        context_brief=proposal.context_brief,
-        agency_name=agency.name,
+    Thin wrapper around :func:`regenerate_section_content` (services layer) so
+    the endpoints keep their existing call shape.
+    """
+    return await regenerate_section_content(
+        proposal,
+        section_type,
         refine_instructions=refine_instructions,
+        db=db,
     )

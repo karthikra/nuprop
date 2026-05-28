@@ -461,8 +461,8 @@ async def test_regenerate_section_preserves_existing_assets(client, _proposal, d
 
     from app.services.ai import section_facts
     monkeypatch.setattr(section_facts, "generate_fact_section", _fake_fact)
-    import app.views.v1.proposals as proposals_view
-    monkeypatch.setattr(proposals_view, "generate_fact_section", _fake_fact, raising=False)
+    import app.services.sections.regeneration as regeneration
+    monkeypatch.setattr(regeneration, "generate_fact_section", _fake_fact, raising=False)
 
     r = await client.post(
         f"{API}/proposals/{proposal.id}/sections/problem_statement/regenerate",
@@ -495,8 +495,8 @@ async def test_refine_section_preserves_existing_assets(client, _proposal, db, m
 
     from app.services.ai import section_facts
     monkeypatch.setattr(section_facts, "generate_fact_section", _fake_fact)
-    import app.views.v1.proposals as proposals_view
-    monkeypatch.setattr(proposals_view, "generate_fact_section", _fake_fact, raising=False)
+    import app.services.sections.regeneration as regeneration
+    monkeypatch.setattr(regeneration, "generate_fact_section", _fake_fact, raising=False)
 
     r = await client.post(
         f"{API}/proposals/{proposal.id}/sections/problem_statement/refine",

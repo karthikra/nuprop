@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
@@ -15,6 +16,8 @@ from app.domain.schemas.chat_schemas import ChatMessageResponse, SendMessageRequ
 from app.infrastructure.db.database import async_session_factory, get_db
 from app.infrastructure.db.models.proposal import Proposal
 from app.infrastructure.db.models.user import User
+from app.infrastructure.queue.events import publish
+from app.services.cost_model_service import CostItemEditError, apply_cost_item_edit
 from app.viewmodels.chat_viewmodel import ChatViewModel
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -114,6 +117,7 @@ async def approve_gate(
 @router.post("/{proposal_id}/retry", response_model=dict)
 async def retry_failed_phase(
     proposal_id: UUID,
+    request: Request,
     agency_id: UUID = Depends(get_current_agency_id),
     vm: ChatViewModel = Depends(get_vm),
 ):
@@ -133,12 +137,17 @@ async def retry_failed_phase(
     # ARQ already has a stored result for the previous (failed) attempt's
     # job_id. Append a unique key so this re-enqueue is treated as a fresh job.
     await vm._enqueue(phase, proposal_id, idempotency_key=str(uuid4()))
+    # Route through Redis pub/sub (not the local ws_manager) so the queued
+    # event reaches WS clients on every API replica.
+    await publish(request.app.state.arq_pool, str(proposal_id), {
+        "type": "job_status", "phase": phase, "state": "queued", "error": None,
+    })
     return {"phase": phase, "state": "queued"}
 
 
 class UpdateCostItemRequest(BaseModel):
     index: int
-    field: str  # "quantity" | "unit_cost"
+    field: Literal["quantity", "unit_cost"]
     value: int
 
 
@@ -155,35 +164,12 @@ async def update_cost_model_item(
         raise HTTPException(status_code=404, detail="Proposal not found")
 
     cost_model = proposal.cost_model
-    if not cost_model or "line_items" not in cost_model:
-        raise HTTPException(status_code=400, detail="No cost model to update")
-
-    items = cost_model["line_items"]
-    if body.index < 0 or body.index >= len(items):
-        raise HTTPException(status_code=400, detail="Invalid line item index")
-
-    item = items[body.index]
-    if body.field == "quantity":
-        item["quantity"] = body.value
-        item["total"] = item["unit_cost"] * body.value
-    elif body.field == "unit_cost":
-        item["unit_cost"] = body.value
-        item["total"] = body.value * item["quantity"]
-    else:
-        raise HTTPException(status_code=400, detail=f"Invalid field: {body.field}")
-
-    # Recalculate totals
-    subtotal = sum(i["total"] for i in items)
-    discount_pct = cost_model.get("discount_percent", 0)
-    discount_amt = int(subtotal * discount_pct / 100)
-    total = subtotal - discount_amt
-    gst = int(total * 0.18)
-
-    cost_model["subtotal"] = subtotal
-    cost_model["discount_amount"] = discount_amt
-    cost_model["total"] = total
-    cost_model["gst_amount"] = gst
-    cost_model["grand_total"] = total + gst
+    try:
+        cost_model = apply_cost_item_edit(
+            cost_model, index=body.index, field=body.field, value=body.value
+        )
+    except CostItemEditError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     await vm.proposal_repo.update(proposal_id, cost_model=cost_model)
 

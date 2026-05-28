@@ -185,6 +185,35 @@ describe('chat-store mergeIdeationMessages', () => {
   })
 })
 
+describe('chat-store jobStatus', () => {
+  beforeEach(() => useChatStore.getState().reset())
+
+  it('jobStatus defaults to null', () => {
+    expect(useChatStore.getState().jobStatus).toBeNull()
+  })
+
+  it('setJobStatus sets the jobStatus slice', () => {
+    useChatStore.getState().setJobStatus({
+      phase: 'run_research',
+      state: 'running',
+      error: null,
+      updated_at: '2026-01-01T00:00:00Z',
+    })
+    expect(useChatStore.getState().jobStatus).toEqual({
+      phase: 'run_research',
+      state: 'running',
+      error: null,
+      updated_at: '2026-01-01T00:00:00Z',
+    })
+  })
+
+  it('reset returns jobStatus to null', () => {
+    useChatStore.getState().setJobStatus({ phase: 'run_research', state: 'queued' })
+    useChatStore.getState().reset()
+    expect(useChatStore.getState().jobStatus).toBeNull()
+  })
+})
+
 describe('chat-store isIdeationTyping', () => {
   beforeEach(() => useChatStore.getState().reset())
 

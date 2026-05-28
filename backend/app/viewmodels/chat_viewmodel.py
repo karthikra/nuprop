@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from fastapi import Request
@@ -10,8 +11,21 @@ from app.domain.schemas.chat_schemas import ChatMessageResponse
 from app.infrastructure.db.models.chat_message import ChatMessage, MessageRole, MessageType
 from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
+from app.infrastructure.queue.enqueue import enqueue_phase_job
+from app.infrastructure.queue.events import publish
+from app.services.ai.chat_intent import PHASE_TO_JOB, classify_intent
 from app.services.ai.template_matcher import TemplateMatcher
+from app.services.cost_model_service import (
+    CostItemEditError,
+    apply_cost_item_edit,
+    find_line_item_index,
+)
+from app.services.llm import Tier, get_ai_service
+from app.services.sections import SECTION_ORDER
+from app.services.sections.regeneration import regenerate_section_content
 from app.viewmodels.shared.viewmodel import ViewModelBase
+
+logger = logging.getLogger(__name__)
 
 
 class ChatViewModel(ViewModelBase):
@@ -43,39 +57,17 @@ class ChatViewModel(ViewModelBase):
         proposal_id,
         idempotency_key: str | None = None,
     ) -> None:
-        """Push a pipeline-phase job onto the ARQ pool held on app.state.
+        """Thin wrapper around the shared :func:`enqueue_phase_job` helper.
 
-        ARQ uses ``_job_id`` as an idempotency key. Two layers of dedup:
-          (a) In-flight: if the same _job_id is currently queued or being
-              processed, ARQ silently drops the duplicate — protects against
-              accidental double-clicks on Approve.
-          (b) Result-cache: if a prior call with this _job_id has a result in
-              Redis (24h TTL by default), subsequent enqueues are silently
-              dropped. **This breaks the retry-after-failure flow** — a failed
-              gate-approval leaves a poisoned result key, and every later
-              "retry" silently no-ops for ~24h.
-
-        We want (a) but not (b). Fix: explicitly DEL the result key before
-        enqueueing. In-flight dedup still works because the queue/in-progress
-        keys aren't touched.
-
-        Callers that need a fresh run per invocation (e.g. ``analyze_brief``
-        per chat turn) still pass an ``idempotency_key`` to get a unique
-        _job_id; the result-key DEL is a no-op for those since the key never
-        existed under the unique ID.
+        See ``app.infrastructure.queue.enqueue`` for the full rationale on why
+        the result-key DEL is needed before every enqueue.
         """
-        pool = self._request.app.state.arq_pool
-        suffix = f":{idempotency_key}" if idempotency_key else ""
-        job_id = f"{proposal_id}:{job_name}{suffix}"
-        # Clear any stale prior result so a deliberate retry can re-enqueue.
-        # In-flight dedup via queue/in-progress keys is unaffected.
-        try:
-            await pool.delete(f"arq:result:{job_id}")
-        except Exception:  # noqa: BLE001
-            # Don't fail enqueue on a transient redis hiccup; ARQ's own
-            # connect-with-retry will reraise something more useful below.
-            pass
-        await pool.enqueue_job(job_name, str(proposal_id), _job_id=job_id)
+        await enqueue_phase_job(
+            self._request.app.state.arq_pool,
+            job_name=job_name,
+            proposal_id=str(proposal_id),
+            idempotency_key=idempotency_key,
+        )
 
     async def _set_job_queued(self, proposal, phase: str) -> dict:
         """Return a copy of proposal.pipeline_state with job_status set to queued."""
@@ -152,8 +144,14 @@ class ChatViewModel(ViewModelBase):
             self.status_code = 201
             return [user_msg]
 
-        # non-brief phases: unchanged echo placeholder, returned synchronously
-        assistant_msg = await self._echo_response(proposal_id, content, current_phase)
+        # Non-brief phases: classify the message (Path B) and route it.
+        await ws_manager.broadcast(str(proposal_id), {"type": "typing", "typing": True})
+        intent = await classify_intent(
+            user_message=content,
+            current_phase=current_phase,
+            proposal_state_hint=self._intent_hint(proposal),
+        )
+        assistant_msg = await self._dispatch_intent(proposal, intent, current_phase)
         await self._broadcast_msg(proposal_id, assistant_msg)
         self.status_code = 201
         return [user_msg, assistant_msg]
@@ -365,3 +363,119 @@ class ChatViewModel(ViewModelBase):
             content=text,
             phase=phase,
         )
+
+    # ── Path B: intent dispatch ───────────────────────────────────────────────
+    def _intent_hint(self, proposal) -> dict:
+        cost = proposal.cost_model or {}
+        items = cost.get("line_items") or []
+        return {
+            "section_types": list(SECTION_ORDER),
+            "cost_items": [
+                str(i.get("deliverable", "")) for i in items if i.get("deliverable")
+            ],
+        }
+
+    async def _ack(self, proposal_id, text: str, phase: str) -> ChatMessage:
+        return await self._echo_response(proposal_id, "", phase, override_text=text)
+
+    async def _dispatch_intent(self, proposal, intent, current_phase) -> ChatMessage:
+        kind = intent.get("kind", "unknown")
+        proposal_id = proposal.id
+
+        if kind == "re_run_phase":
+            job = PHASE_TO_JOB[intent["phase"]]
+            pipeline = await self._set_job_queued(proposal, job)
+            await self.proposal_repo.update(proposal_id, pipeline_state=pipeline)
+            await self._db.commit()  # commit before enqueue so the worker sees queued state
+            await self._enqueue(job, proposal_id)
+            # Route through Redis pub/sub (not the local ws_manager) so the
+            # queued event reaches WS clients on every API replica.
+            await publish(self._request.app.state.arq_pool, str(proposal_id), {
+                "type": "job_status", "phase": job, "state": "queued", "error": None,
+            })
+            label = intent["phase"].replace("_", " ")
+            return await self._ack(proposal_id, f"Re-running {label}…", current_phase)
+
+        if kind in ("regenerate_section", "refine_section"):
+            section_type = intent["section_type"]
+            if section_type not in SECTION_ORDER:
+                return await self._ack(
+                    proposal_id,
+                    f'I don\'t recognize the section "{section_type}".',
+                    current_phase,
+                )
+            instructions = intent.get("instructions") if kind == "refine_section" else None
+            new_payload = await regenerate_section_content(
+                proposal, section_type, instructions, self._db,
+            )
+            current = getattr(proposal, section_type, None) or {}
+            new_payload["assets"] = current.get("assets", [])
+            await self.proposal_repo.update(proposal_id, **{section_type: new_payload})
+            await self._db.commit()
+            label = section_type.replace("_", " ")
+            verb = "Refining" if kind == "refine_section" else "Regenerating"
+            return await self._ack(proposal_id, f"{verb} {label}…", current_phase)
+
+        if kind == "edit_cost_item":
+            cost = proposal.cost_model or {}
+            idx = find_line_item_index(cost, intent["deliverable"])
+            if idx is None:
+                return await self._ack(
+                    proposal_id,
+                    f'I couldn\'t find a cost item called "{intent["deliverable"]}".',
+                    current_phase,
+                )
+            try:
+                updated = apply_cost_item_edit(
+                    cost, index=idx, field=intent["field"], value=intent["value"],
+                )
+            except CostItemEditError:
+                return await self._ack(
+                    proposal_id, "I couldn't apply that cost-model edit.", current_phase,
+                )
+            await self.proposal_repo.update(proposal_id, cost_model=updated)
+            await self._db.commit()
+            await ws_manager.broadcast(
+                str(proposal_id), {"type": "cost_model_update", "cost_model": updated},
+            )
+            label = intent["field"].replace("_", " ")
+            return await self._ack(
+                proposal_id, f"Updated {label} for {intent['deliverable']}.", current_phase,
+            )
+
+        if kind == "ask_question":
+            answer = await self._answer_question(proposal, intent["question"])
+            return await self._ack(proposal_id, answer, current_phase)
+
+        # unknown
+        return await self._echo_response(
+            proposal_id, "", current_phase,
+            override_text=(
+                "I can re-run a phase (research, benchmarks, cost model, sections), "
+                "regenerate or refine a section, edit a cost item, or answer questions "
+                'about your proposal. Try: "redo research" or '
+                '"regenerate the problem statement".'
+            ),
+        )
+
+    async def _answer_question(self, proposal, question: str) -> str:
+        context = (
+            f"Project: {proposal.project_name}\n"
+            f"Brief: {proposal.brief or {}}\n"
+            f"Cost model: {proposal.cost_model or {}}\n"
+        )
+        try:
+            result = await get_ai_service().complete(
+                f"Answer the user's question about this proposal concisely.\n\n"
+                f"{context}\nQuestion: {question}",
+                tier=Tier.BALANCED,
+                system=(
+                    "You are a helpful proposal assistant. Answer in 1-3 sentences "
+                    "using only the provided context."
+                ),
+                max_tokens=400,
+            )
+            return result.text
+        except Exception:  # noqa: BLE001 — never 500 the chat send
+            logger.exception("ask_question LLM call failed")
+            return "I couldn't answer that right now — please try again in a moment."

@@ -266,12 +266,14 @@ async def test_process_stream_dedupes_citations_by_url():
     assert body_text[spans[1]["start"]:spans[1]["end"]] == "2008 rebrand"
 
 
-async def test_process_stream_skips_citations_whose_cited_text_is_not_in_body():
-    """Citations whose cited_text isn't a verbatim substring are skipped.
+async def test_process_stream_keeps_non_matching_citation_without_span():
+    """Citations whose cited_text isn't a verbatim substring are KEPT.
 
-    Acceptable v1 behaviour: drop the span rather than emit a degenerate
-    {start:0, end:0} entry that the frontend can't render correctly. This
-    can happen if Claude paraphrases very slightly.
+    Updated contract (P4): the source attribution is the primary value, so a
+    citation whose cited_text doesn't appear verbatim in the body must still
+    be recorded — only the body-anchored span is dropped (we don't emit a
+    degenerate {start:0, end:0} entry the frontend can't render). This can
+    happen whenever Claude paraphrases.
     """
     events, on_event = await _make_collector()
     body_text = "Pepsi revenue grew."
@@ -283,6 +285,46 @@ async def test_process_stream_skips_citations_whose_cited_text_is_not_in_body():
         _stop(_text_block(body_text, citations=[citation])),
     ])
     _, citations, spans = await process_stream(stream, on_event=on_event)
+    assert len(citations) == 1
+    assert spans == []
+
+
+async def test_process_stream_keeps_paraphrased_citation_without_span():
+    """Regression (P4): when Claude paraphrases so cited_text isn't a verbatim
+    substring of the body, the citation MUST still be recorded — only the
+    body-anchored span is dropped. Production benchmarks_findings rows were
+    storing citations==[] because the old code only recorded a citation when
+    the substring match succeeded, and synthesized prose rarely quotes
+    sources verbatim."""
+    events, on_event = await _make_collector()
+    body_text = "Apple posted record Q4 revenue."
+    citation = _citation(
+        "https://apple.com/q4", "Apple Q4",
+        "Apple reported a record fourth-quarter revenue figure",  # paraphrase, not a substring
+    )
+    stream = _AsyncIter([
+        _delta(body_text),
+        _stop(_text_block(body_text, citations=[citation])),
+    ])
+    _, citations, spans = await process_stream(stream, on_event=on_event)
+    assert len(citations) == 1
+    assert citations[0]["url"] == "https://apple.com/q4"
+    assert spans == []   # no body anchor, but the source is still captured
+
+
+async def test_process_stream_drops_citation_with_no_url():
+    """A citation with an empty URL can't be a source link — drop it rather
+    than record a degenerate {'url': ''} entry that the URL-dedup would then
+    collapse all future empty-URL citations into."""
+    events, on_event = await _make_collector()
+    body_text = "Some finding."
+    citation = _citation("", "No URL", "Some finding")  # empty url
+    stream = _AsyncIter([
+        _delta(body_text),
+        _stop(_text_block(body_text, citations=[citation])),
+    ])
+    _, citations, spans = await process_stream(stream, on_event=on_event)
+    assert citations == []
     assert spans == []
 
 

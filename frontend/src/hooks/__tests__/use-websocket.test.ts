@@ -178,6 +178,20 @@ describe('useProposalWebSocket', () => {
     expect(useChatStore.getState().ideationMessages[0].id).toBe('m-ideation-1')
   })
 
+  it('dispatches a job_status event into the chat store', () => {
+    renderHook(() => useProposalWebSocket('prop-1'))
+    act(() =>
+      MockWebSocket.instances[0].emit({
+        type: 'job_status', phase: 'run_research', state: 'running',
+        error: null, updated_at: '2026-01-01T00:00:00Z',
+      }),
+    )
+    expect(useChatStore.getState().jobStatus).toEqual({
+      phase: 'run_research', state: 'running', error: null,
+      updated_at: '2026-01-01T00:00:00Z',
+    })
+  })
+
   it('ignores malformed messages without throwing', () => {
     renderHook(() => useProposalWebSocket('prop-1'))
     expect(() => {

@@ -98,9 +98,9 @@ async def test_regenerate_calls_fact_generator_and_writes(
         }
 
     monkeypatch.setattr(section_facts, "generate_fact_section", _fake_fact)
-    # Also patch the proposals.py-imported reference
-    import app.views.v1.proposals as proposals_view
-    monkeypatch.setattr(proposals_view, "generate_fact_section", _fake_fact, raising=False)
+    # Also patch the reference imported into the regeneration service.
+    import app.services.sections.regeneration as regeneration
+    monkeypatch.setattr(regeneration, "generate_fact_section", _fake_fact, raising=False)
 
     r = await client.post(
         f"{API}/proposals/{proposal.id}/sections/problem_statement/regenerate",
@@ -121,8 +121,8 @@ async def test_refine_passes_user_instructions(client, _proposal_with_section, m
         return {"content": "refined", "assets": [], "included": True, "metadata": {}}
 
     monkeypatch.setattr(section_facts, "generate_fact_section", _capturing)
-    import app.views.v1.proposals as proposals_view
-    monkeypatch.setattr(proposals_view, "generate_fact_section", _capturing, raising=False)
+    import app.services.sections.regeneration as regeneration
+    monkeypatch.setattr(regeneration, "generate_fact_section", _capturing, raising=False)
 
     r = await client.post(
         f"{API}/proposals/{proposal.id}/sections/problem_statement/refine",

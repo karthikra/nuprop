@@ -86,6 +86,37 @@ Check for leftover worktrees from this session: `git worktree list`. If `s5-pipe
 
 ---
 
+## What happened this session (2026-05-28 — Post-S10 stability + chat intent slice)
+
+Executed `docs/superpowers/specs/2026-05-27-post-s10-stability-and-chat-intent.md` on branch **`worktree-post-s10-stability-and-chat-intent`** (subagent-driven, two-stage reviews per task). **Implemented but NOT yet merged/deployed** — `main` is still at `94a4fae`.
+
+**Sub-slice 1 — pipeline reliability** (plan `plans/2026-05-28-sub-slice-1-pipeline-reliability.md`):
+- **P1** — `.github/workflows/deploy.yml` now auto-restarts the Fly `worker` group after deploy (with `set -euo pipefail`). Closes § 5b.
+- **P2** — extracted the ARQ result-cache retry-trap fix into `app/infrastructure/queue/enqueue.py::enqueue_phase_job` and routed **all 5** enqueue sites through it (was only the chat viewmodel before). Closes § 5a — note the spec said 1 site; there were 5 (worker chain + 3 in `views/v1/proposals.py` + the viewmodel).
+- **P4** — `process_stream` (`services/research_streaming.py`) now keeps citations even when `cited_text` is a paraphrase (was dropping every non-verbatim citation → `citations == []` in prod); also drops no-URL citations.
+
+**Sub-slice 2 — Path B chat intent** (plan `plans/2026-05-28-sub-slice-2-path-b-chat-intent.md`):
+- **P8** — replaced the non-brief `_echo_response` placeholder with an LLM-routed intent layer. New `app/services/ai/chat_intent.py::classify_intent` (single **Haiku 4.5 / Tier.FAST**, Bedrock) → 6 intents (re_run_phase, regenerate_section, refine_section, edit_cost_item, ask_question, unknown), degrades to `unknown` on any failure. `ChatViewModel._dispatch_intent` routes them. Extracted reusable services first: `services/sections/regeneration.py` + `services/cost_model_service.py` (both endpoints + the dispatcher now share one path). `ask_question` answers via Sonnet (Tier.BALANCED). Security: dispatcher validates `section_type ∈ SECTION_ORDER` before any `getattr`/column write.
+
+**Sub-slice 3 — visible progress UX** (plan `plans/2026-05-28-sub-slice-3-progress-ux.md`):
+- **P9** — added a `job_status` WS broadcast (worker emits running/complete/failed via Redis `publish`; API emits `queued` via `publish` too). Frontend: `jobStatus` store slice + WS handler + sticky top-of-chat **PhaseProgress** widget (phase label, state, live elapsed timer, error). **Visually verified** via a throwaway Vite harness + Playwright (running + failed states render correctly).
+- **P10** — Retry button on the failed state → existing `POST /chat/{id}/retry`.
+
+**Sub-slice 4 — quality + cleanup:**
+- **P11** — root-cause fix in `cost_model_builder.py::_ai_match`: `m.get("package_name", "")` returned `None` on explicit JSON null; now synthesizes `"Custom (<deliverable>)"`. The defensive guard from `dfb266f` stays as defense-in-depth. (Also removed a dead `budget_signal` assignment — F841.)
+- This HANDOFF tidy.
+
+**Test counts at end of session:** backend **510**, frontend **285**, all green.
+
+### Remaining operator actions (NOT code — for the human)
+- **P3 / § 5d** — edit the user's global `~/.claude/CLAUDE.md` to add the hosted-tool exception ("hosted-tool calls — web_search/web_fetch/code_execution — that Bedrock can't proxy route to AsyncAnthropic; everything else via Bedrock") and to stop claiming Opus 4.7 as the heavy tier. Not done autonomously (it's the user's global config).
+- **P5** — stop the duplicate standby worker: `fly machine stop 865139be669de8 -a nuprop`.
+- **P7** — cancel the Upstash subscription (`positive-man-126512`) once self-hosted Redis is proven (~Sat).
+- **§ 5c** — request Bedrock Opus 4.7 access in AWS Console (`ap-northeast-1`); revert path in § 3 once granted.
+- **P6** — version skew: already resolved (all machines on v46 as of session start).
+
+---
+
 ## What happened this session (2026-05-27 — S10)
 
 Shipped **S10 — image media (upload + Nano Banana generation)**, the second slice of the S9-S13 section-redesign roadmap.
@@ -189,14 +220,14 @@ The Fly secret rotation brought the standby worker `865139be669de8` to `started`
 
 Real bugs surfaced today that didn't get fixed in this session. All small. Worth landing as a single `chore(ops)` slice next session.
 
-**5a. ARQ `_job_id` retry trap.** Every pipeline phase that uses a deterministic `_job_id` (`{proposal_id}:{phase}`) silently no-ops on retry because ARQ checks for an existing result key under that ID and skips re-enqueue. Today's smoke test hit this on `run_research`: after the first 403, every retry attempt returned `200 OK` from the API but the worker never picked the job up because the result key from the failed run was still in Redis (24h TTL).
+**5a. ARQ `_job_id` retry trap.** ✅ **FIXED on branch `worktree-post-s10-stability-and-chat-intent` (sub-slice 1, P2 — pending merge).** Fix candidate (b) was chosen: a shared `enqueue_phase_job` helper DELs the result key before every enqueue, applied to all 5 enqueue sites. Original analysis below for context. — Every pipeline phase that uses a deterministic `_job_id` (`{proposal_id}:{phase}`) silently no-ops on retry because ARQ checks for an existing result key under that ID and skips re-enqueue. Today's smoke test hit this on `run_research`: after the first 403, every retry attempt returned `200 OK` from the API but the worker never picked the job up because the result key from the failed run was still in Redis (24h TTL).
 
 - Manual workaround used today: `await r.delete(f"arq:result:{proposal_id}:{phase}")` via `fly ssh console` before re-triggering.
 - Fix candidates: (a) enqueue with a unique job_id (`{proposal_id}:{phase}:{uuid}`) — simplest, removes idempotency-on-retry but the gate-approval flow is already debounced at the UI layer; (b) call `arq_pool.enqueue_job(..., _job_id=...)` after explicit `del arq:result:<id>:<phase>` — keeps idempotency but adds a Redis round-trip per enqueue; (c) override `_result_ttl=0` on the failed-result path so it doesn't poison subsequent retries. **Recommend (a)** — simplest and matches how user-driven retries should work.
 - Affects every phase: `analyze_brief`, `run_research`, `run_benchmarks`, `build_cost_model`, `generate_sections`, `enrich_context_from_emails`. `analyze_brief` already uses unique job IDs (`{proposal_id}:analyze_brief:{uuid}` per the Redis keys), so it's exempt. Others use deterministic IDs and have the bug latent.
 - Estimated effort: ~30 min code + 2 tests.
 
-**5b. Fly worker-stop after secret changes — permanent fix.** Already documented in § 2 above as the workaround. The permanent fix is a post-deploy step in `.github/workflows/deploy.yml`:
+**5b. Fly worker-stop after secret changes — permanent fix.** ✅ **FIXED on branch (sub-slice 1, P1 — pending merge + first deploy to verify).** Already documented in § 2 above as the workaround. The permanent fix is a post-deploy step in `.github/workflows/deploy.yml`:
 
 ```yaml
 - name: Ensure worker process group is running
@@ -210,7 +241,7 @@ Lives at the end of the deploy job, after `flyctl deploy`. Catches both the depl
 
 **5c. Opus 4.7 access in Bedrock — non-code AWS action.** See § 3 for the full revert path once access is granted. Open the AWS Console → Bedrock → Model access in `ap-northeast-1`. Some accounts get instant approval; new/cold accounts can take hours.
 
-**5d. Stale onboarding — `~/.claude/CLAUDE.md` claims Opus 4.7 as heavy tier.** Update the user's global instructions to reflect that NUPROP currently runs on Opus 4.6 with research on Sonnet 4.6 pending § 5c. Five-line edit.
+**5d. Stale onboarding — `~/.claude/CLAUDE.md` claims Opus 4.7 as heavy tier.** ⏳ **STILL PENDING (tracked as P3 — operator action).** Not done autonomously since it's the user's global config. Update the user's global instructions to reflect that NUPROP currently runs on Opus 4.6 with research on Sonnet 4.6 pending § 5c, AND add the hosted-tool ANTHROPIC_API_KEY exception (see § 5e policy note). Five-line edit.
 
 **5e. Bedrock in `ap-northeast-1` doesn't expose Anthropic's hosted `web_search` tool — RESOLVED via Option 1 routing.** Both `run_research` and `run_benchmarks` originally used `tools=[{"type": "web_search_20250305", ...}]` in streaming calls. Bedrock 400s with the accepted-tools list limited to bash/custom/memory/text_editor/tool_search variants. The streaming `except Exception` block was writing "failed" to the activity log but NOT re-raising, so ARQ reported success despite no research being persisted — silent-failure mode that hid the bug across S5/S6/S7/S8 sessions.
 
