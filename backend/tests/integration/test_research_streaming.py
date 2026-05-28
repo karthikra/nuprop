@@ -312,6 +312,22 @@ async def test_process_stream_keeps_paraphrased_citation_without_span():
     assert spans == []   # no body anchor, but the source is still captured
 
 
+async def test_process_stream_drops_citation_with_no_url():
+    """A citation with an empty URL can't be a source link — drop it rather
+    than record a degenerate {'url': ''} entry that the URL-dedup would then
+    collapse all future empty-URL citations into."""
+    events, on_event = await _make_collector()
+    body_text = "Some finding."
+    citation = _citation("", "No URL", "Some finding")  # empty url
+    stream = _AsyncIter([
+        _delta(body_text),
+        _stop(_text_block(body_text, citations=[citation])),
+    ])
+    _, citations, spans = await process_stream(stream, on_event=on_event)
+    assert citations == []
+    assert spans == []
+
+
 async def test_process_stream_emits_synthesizing_note_at_end():
     """After the stream ends the worker is doing final synthesis — surface that."""
     events, on_event = await _make_collector()

@@ -29,6 +29,7 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
+          set -euo pipefail
           flyctl machine list -a nuprop --json \
             | jq -r '.[] | select(.config.metadata.fly_process_group == "worker" and .state == "stopped") | .id' \
             | xargs -r -I{} flyctl machine start {} -a nuprop

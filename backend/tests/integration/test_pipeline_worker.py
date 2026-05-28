@@ -143,3 +143,34 @@ async def test_chain_enqueue_clears_stale_result_key_before_enqueueing_next_phas
     redis.delete.assert_awaited_once_with(f"arq:result:{pid}:run_benchmarks")
     redis.enqueue_job.assert_awaited_once()
     assert redis.enqueue_job.await_args.args[0] == "run_benchmarks"
+
+
+async def test_chain_enqueue_clears_stale_result_key_for_benchmarks_to_cost_model_hop(
+    db, monkeypatch, make_proposal_db
+):
+    """Same regression as above, but for the SECOND chain hop
+    (run_benchmarks -> build_cost_model — the second entry in ``_NEXT_PHASE``).
+    Running ``run_benchmarks`` must DEL the poisoned
+    ``arq:result:<pid>:build_cost_model`` key before enqueueing build_cost_model
+    so a re-run on the same _job_id isn't silently swallowed."""
+    _, _, proposal = await make_proposal_db(
+        brief={"client": {"name": "Acme"}, "project": {"deliverables": []}},
+        pipeline_state={"current_phase": "research", "phases_completed": []},
+    )
+    pid = str(proposal.id)
+
+    # Mock the PipelineService.run_benchmarks method to succeed without hitting
+    # Bedrock — mirrors how the run_research hop mocks its phase internals.
+    monkeypatch.setattr(
+        "app.services.pipeline_service.PipelineService.run_benchmarks",
+        AsyncMock(return_value=None),
+    )
+
+    ctx = _ctx()
+    await worker.run_benchmarks(ctx, pid)
+
+    redis = ctx["redis"]
+    # The next phase's result-cache key is DEL'd before the chained enqueue.
+    redis.delete.assert_awaited_once_with(f"arq:result:{pid}:build_cost_model")
+    redis.enqueue_job.assert_awaited_once()
+    assert redis.enqueue_job.await_args.args[0] == "build_cost_model"

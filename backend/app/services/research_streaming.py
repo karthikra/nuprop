@@ -199,6 +199,9 @@ async def process_stream(
                 # the same snippet appears twice.
                 cursor = 0
                 for c in (getattr(block, "citations", None) or []):
+                    if not (getattr(c, "url", "") or ""):
+                        # No URL → can't render as a source link; drop it.
+                        continue
                     # Record the source unconditionally. The citation (source
                     # attribution) is the primary value; the body-anchored span
                     # is a best-effort nicety on top.
