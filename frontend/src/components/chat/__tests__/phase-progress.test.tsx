@@ -74,4 +74,30 @@ describe('PhaseProgress', () => {
     await user.click(screen.getByRole('button', { name: /retry/i }))
     await waitFor(() => expect(retried).toBe(true))
   })
+
+  it('optimistically transitions out of the failed state on a successful retry', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post(`${API}/chat/p1/retry`, () => HttpResponse.json({ phase: 'run_research', state: 'queued' })),
+    )
+    useChatStore.setState({
+      jobStatus: {
+        phase: 'run_research',
+        state: 'failed',
+        error: 'Bedrock timed out',
+        updated_at: new Date().toISOString(),
+      },
+    })
+    renderWithProviders(<PhaseProgress proposalId="p1" />)
+
+    await user.click(screen.getByRole('button', { name: /retry/i }))
+
+    // After success the widget leaves the failed/Retry state and shows Queued —
+    // no double-submit window where a second Retry click can fire.
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /retry/i })).toBeNull()
+    })
+    expect(screen.getByText(/queued/i)).toBeInTheDocument()
+    expect(useChatStore.getState().jobStatus?.state).toBe('queued')
+  })
 })

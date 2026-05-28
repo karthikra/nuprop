@@ -27,30 +27,47 @@ function formatElapsed(seconds: number): string {
  * and surfaces a Retry action when the phase fails. */
 export function PhaseProgress({ proposalId }: Props) {
   const jobStatus = useChatStore((s) => s.jobStatus)
+  const setJobStatus = useChatStore((s) => s.setJobStatus)
   const retry = useRetryPhase(proposalId)
   const [now, setNow] = useState(() => Date.now())
 
   const isRunning = jobStatus?.state === 'running'
   const startedAt = jobStatus?.updated_at
+  // Only treat the anchor as usable when it parses to a finite epoch — a
+  // missing/invalid updated_at (e.g. queued) must not produce a NaN timer.
+  const startedAtMs =
+    startedAt != null && Number.isFinite(Date.parse(startedAt))
+      ? Date.parse(startedAt)
+      : null
 
-  // Live elapsed timer — only ticks while the job is running and we have an
-  // anchor timestamp. Cleared on unmount or when state leaves "running".
+  // Live elapsed timer — only ticks while the job is running and we have a
+  // valid anchor timestamp. Cleared on unmount or when state leaves "running".
   useEffect(() => {
-    if (!isRunning || !startedAt) return
+    if (!isRunning || startedAtMs == null) return
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
-  }, [isRunning, startedAt])
+  }, [isRunning, startedAtMs])
 
   if (jobStatus == null) return null
 
   const label = JOB_LABELS[jobStatus.phase] ?? jobStatus.phase.replace(/_/g, ' ')
 
   const elapsed =
-    isRunning && startedAt
-      ? formatElapsed(Math.max(0, Math.floor((now - Date.parse(startedAt)) / 1000)))
+    isRunning && startedAtMs != null
+      ? formatElapsed(Math.max(0, Math.floor((now - startedAtMs) / 1000)))
       : null
 
+  const handleRetry = () => {
+    retry.mutate(undefined, {
+      // Optimistically advance to "queued" so the failed/Retry state clears
+      // immediately — closes the double-submit window before the WS event lands.
+      onSuccess: () => setJobStatus({ ...jobStatus, state: 'queued', error: null }),
+    })
+  }
+
   return (
+    // Sticky positioning relies on NO `overflow:hidden` ancestor between this
+    // bar and the chat scroll container — adding one would break the pin.
     <div className="sticky top-0 z-10 -mx-6 -mt-4 mb-2 px-6 py-2 bg-white/95 backdrop-blur border-b border-stone-200 flex items-center gap-3 text-sm">
       <span className="font-medium text-stone-900">{label}</span>
 
@@ -89,7 +106,7 @@ export function PhaseProgress({ proposalId }: Props) {
           )}
           <button
             type="button"
-            onClick={() => retry.mutate()}
+            onClick={handleRetry}
             disabled={retry.isPending}
             className="ml-auto flex-shrink-0 rounded-md border border-stone-300 px-2.5 py-1 text-xs font-medium text-stone-700 hover:bg-stone-100 disabled:opacity-50 disabled:cursor-not-allowed"
           >

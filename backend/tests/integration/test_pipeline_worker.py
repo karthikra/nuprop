@@ -178,6 +178,7 @@ async def test_chain_enqueue_clears_stale_result_key_for_benchmarks_to_cost_mode
 
 async def test_run_phase_broadcasts_job_status_running_then_complete(db, make_proposal_db, monkeypatch):
     import json
+    from datetime import datetime
 
     from app.services.pipeline_service import PipelineService
     from app.workers.pipeline import _run_phase
@@ -186,12 +187,21 @@ async def test_run_phase_broadcasts_job_status_running_then_complete(db, make_pr
     redis = AsyncMock()
     await _run_phase({"redis": redis}, "run_research", str(proposal.id))
     states = []
+    payloads_by_state: dict[str, dict] = {}
     for call in redis.publish.await_args_list:
         env = json.loads(call.args[1])
-        if env["payload"].get("type") == "job_status":
-            states.append(env["payload"]["state"])
+        payload = env["payload"]
+        if payload.get("type") == "job_status":
+            states.append(payload["state"])
+            payloads_by_state[payload["state"]] = payload
     assert "running" in states
     assert "complete" in states
+    # The timer anchor must be present and ISO-parseable on the live payloads —
+    # guards against a future change silently dropping updated_at.
+    for state in ("running", "complete"):
+        updated_at = payloads_by_state[state].get("updated_at")
+        assert updated_at, f"{state} job_status missing updated_at"
+        datetime.fromisoformat(updated_at)  # raises if not ISO
 
 
 async def test_run_phase_broadcasts_job_status_failed_on_error(db, make_proposal_db, monkeypatch):

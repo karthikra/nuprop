@@ -106,7 +106,7 @@ export interface WSMessage {
   status?: string
   detail?: string
   error?: string
-  state?: string
+  state?: 'queued' | 'running' | 'complete' | 'failed'
   updated_at?: string
 }
 

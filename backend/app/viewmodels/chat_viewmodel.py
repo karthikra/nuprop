@@ -12,6 +12,7 @@ from app.infrastructure.db.models.chat_message import ChatMessage, MessageRole, 
 from app.infrastructure.db.repositories.chat_message_repo import ChatMessageRepository
 from app.infrastructure.db.repositories.proposal_repo import ProposalRepository
 from app.infrastructure.queue.enqueue import enqueue_phase_job
+from app.infrastructure.queue.events import publish
 from app.services.ai.chat_intent import PHASE_TO_JOB, classify_intent
 from app.services.ai.template_matcher import TemplateMatcher
 from app.services.cost_model_service import (
@@ -387,7 +388,9 @@ class ChatViewModel(ViewModelBase):
             await self.proposal_repo.update(proposal_id, pipeline_state=pipeline)
             await self._db.commit()  # commit before enqueue so the worker sees queued state
             await self._enqueue(job, proposal_id)
-            await ws_manager.broadcast(str(proposal_id), {
+            # Route through Redis pub/sub (not the local ws_manager) so the
+            # queued event reaches WS clients on every API replica.
+            await publish(self._request.app.state.arq_pool, str(proposal_id), {
                 "type": "job_status", "phase": job, "state": "queued", "error": None,
             })
             label = intent["phase"].replace("_", " ")

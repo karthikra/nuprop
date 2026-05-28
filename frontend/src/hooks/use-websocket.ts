@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useChatStore } from '../stores/chat-store'
-import type { JobStatus, WSMessage } from '../types/proposal'
+import type { WSMessage } from '../types/proposal'
 
 export function useProposalWebSocket(proposalId: string | undefined) {
   const addMessage = useChatStore((s) => s.addMessage)
@@ -76,7 +76,7 @@ export function useProposalWebSocket(proposalId: string | undefined) {
           } else if (data.type === 'job_status' && data.phase && data.state) {
             setJobStatus({
               phase: data.phase,
-              state: data.state as JobStatus['state'],
+              state: data.state,
               error: data.error ?? null,
               updated_at: data.updated_at,
             })

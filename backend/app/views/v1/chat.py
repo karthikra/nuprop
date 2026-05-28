@@ -16,6 +16,7 @@ from app.domain.schemas.chat_schemas import ChatMessageResponse, SendMessageRequ
 from app.infrastructure.db.database import async_session_factory, get_db
 from app.infrastructure.db.models.proposal import Proposal
 from app.infrastructure.db.models.user import User
+from app.infrastructure.queue.events import publish
 from app.services.cost_model_service import CostItemEditError, apply_cost_item_edit
 from app.viewmodels.chat_viewmodel import ChatViewModel
 
@@ -116,6 +117,7 @@ async def approve_gate(
 @router.post("/{proposal_id}/retry", response_model=dict)
 async def retry_failed_phase(
     proposal_id: UUID,
+    request: Request,
     agency_id: UUID = Depends(get_current_agency_id),
     vm: ChatViewModel = Depends(get_vm),
 ):
@@ -135,7 +137,9 @@ async def retry_failed_phase(
     # ARQ already has a stored result for the previous (failed) attempt's
     # job_id. Append a unique key so this re-enqueue is treated as a fresh job.
     await vm._enqueue(phase, proposal_id, idempotency_key=str(uuid4()))
-    await ws_manager.broadcast(str(proposal_id), {
+    # Route through Redis pub/sub (not the local ws_manager) so the queued
+    # event reaches WS clients on every API replica.
+    await publish(request.app.state.arq_pool, str(proposal_id), {
         "type": "job_status", "phase": phase, "state": "queued", "error": None,
     })
     return {"phase": phase, "state": "queued"}

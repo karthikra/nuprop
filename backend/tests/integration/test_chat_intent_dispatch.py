@@ -47,6 +47,37 @@ async def test_re_run_phase_enqueues_job_and_acks(
 
 
 @pytest.mark.asyncio
+async def test_re_run_phase_publishes_queued_job_status_via_redis(
+    client, registered, arq_pool, make_proposal_api, monkeypatch,
+):
+    """The queued job_status must go out over Redis pub/sub (arq_pool.publish),
+    not the local ws_manager, so it reaches every API replica's WS clients."""
+    import json
+
+    _patch_intent(monkeypatch, {"kind": "re_run_phase", "phase": "research", "confidence": 0.95})
+    p = await make_proposal_api(client, registered.headers)
+    await _move_out_of_brief(client, registered.headers, p["id"])
+    arq_pool.reset_mock()
+
+    resp = await client.post(
+        f"{API}/chat/{p['id']}/send", headers=registered.headers,
+        json={"content": "redo the research"},
+    )
+    assert resp.status_code == 201
+
+    arq_pool.publish.assert_awaited()
+    # Decode the published envelope(s) and find the queued job_status payload.
+    queued_payloads = []
+    for call in arq_pool.publish.await_args_list:
+        envelope = json.loads(call.args[1])
+        payload = envelope["payload"]
+        if payload.get("type") == "job_status" and payload.get("state") == "queued":
+            queued_payloads.append(payload)
+    assert queued_payloads, "expected a queued job_status publish"
+    assert queued_payloads[0]["phase"] == "run_research"
+
+
+@pytest.mark.asyncio
 async def test_unknown_intent_returns_help_and_enqueues_nothing(
     client, registered, arq_pool, make_proposal_api, monkeypatch,
 ):
