@@ -5,6 +5,7 @@ import { MessageBubble, TypingIndicator, ProgressTracker } from './message-bubbl
 import { ChatInput } from './chat-input'
 import { ContextCheck } from './context-check'
 import { RateGapCard } from './rate-gap-card'
+import { PhaseProgress } from './phase-progress'
 import type { RateCardGaps } from '../../types/proposal'
 
 interface Props {
@@ -43,6 +44,7 @@ export function ChatContainer({ proposalId, clientId, clientName, clientHasConte
     <div className="flex flex-col h-full">
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        <PhaseProgress proposalId={proposalId} />
         {/* Context check — shown for new proposals */}
         {messages.length === 0 && clientId && clientName && (
           <ContextCheck

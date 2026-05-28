@@ -113,6 +113,15 @@ export function useSkipRateCardGaps(proposalId: string) {
   })
 }
 
+export function useRetryPhase(proposalId: string) {
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await api.post(`/chat/${proposalId}/retry`)
+      return data
+    },
+  })
+}
+
 export function useImportRateCardXlsx(proposalId: string) {
   return useMutation({
     mutationFn: async (file: File) => {
