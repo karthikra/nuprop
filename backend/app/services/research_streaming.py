@@ -140,9 +140,12 @@ async def process_stream(
     each citation's ``cited_text`` as a verbatim substring. The Anthropic
     SDK's ``CitationsWebSearchResultLocation`` carries only ``url``,
     ``title``, ``cited_text`` and ``encrypted_index`` — there are no
-    character-offset fields to read directly. Citations whose ``cited_text``
-    isn't a verbatim substring of the surrounding text block are skipped
-    rather than emitted as degenerate ``{start: 0, end: 0}`` spans.
+    character-offset fields to read directly. Every citation is recorded;
+    citations whose ``cited_text`` isn't a verbatim substring of the
+    surrounding text block are kept without a body-anchored span (rather than
+    emitted as degenerate ``{start: 0, end: 0}`` spans). Hosted ``web_search``
+    frequently paraphrases, so dropping such citations would silently lose
+    source attribution.
     """
     body_parts: list[str] = []
     citations: list[CitationRef] = []
@@ -196,19 +199,22 @@ async def process_stream(
                 # the same snippet appears twice.
                 cursor = 0
                 for c in (getattr(block, "citations", None) or []):
+                    # Record the source unconditionally. The citation (source
+                    # attribution) is the primary value; the body-anchored span
+                    # is a best-effort nicety on top.
+                    cit = _ensure_citation(citations, c)
                     cited = getattr(c, "cited_text", "") or ""
                     if not cited:
                         continue
                     idx = block_text.find(cited, cursor)
                     if idx < 0:
                         # cited_text isn't a verbatim substring — Claude may
-                        # have paraphrased very slightly. Skip rather than
-                        # writing a degenerate span. Future v2: fuzzy match.
+                        # have paraphrased. Keep the citation; just don't emit
+                        # a body-anchored span. Future v2: fuzzy match.
                         continue
                     start = text_offset + idx
                     end = start + len(cited)
                     cursor = idx + len(cited)
-                    cit = _ensure_citation(citations, c)
                     spans.append(
                         {"start": start, "end": end, "citation_ids": [cit["id"]]}
                     )
