@@ -135,6 +135,9 @@ async def retry_failed_phase(
     # ARQ already has a stored result for the previous (failed) attempt's
     # job_id. Append a unique key so this re-enqueue is treated as a fresh job.
     await vm._enqueue(phase, proposal_id, idempotency_key=str(uuid4()))
+    await ws_manager.broadcast(str(proposal_id), {
+        "type": "job_status", "phase": phase, "state": "queued", "error": None,
+    })
     return {"phase": phase, "state": "queued"}
 
 

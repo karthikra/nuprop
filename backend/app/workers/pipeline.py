@@ -30,20 +30,23 @@ _NEXT_PHASE = {
 }
 
 
-async def _set_job_status(session, proposal_id, phase, state, error=None) -> None:
+async def _set_job_status(session, proposal_id, phase, state, error=None, redis=None) -> None:
     repo = ProposalRepository(session)
     proposal = await repo.get_by_id(proposal_id)
     if proposal is None:
         return
     pipeline = proposal.pipeline_state.copy()
-    pipeline["job_status"] = {
+    job_status = {
         "phase": phase,
         "state": state,
         "error": error,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
+    pipeline["job_status"] = job_status
     await repo.update(proposal_id, pipeline_state=pipeline)
     await session.commit()
+    if redis is not None:
+        await publish(redis, proposal_id, {"type": "job_status", **job_status})
 
 
 async def _run_phase(ctx: dict, phase: str, proposal_id: str) -> None:
@@ -56,7 +59,7 @@ async def _run_phase(ctx: dict, phase: str, proposal_id: str) -> None:
     ``POST /chat/{id}/retry`` endpoint, which re-enqueues the phase.
     """
     async with async_session_factory() as session:
-        await _set_job_status(session, proposal_id, phase, "running")
+        await _set_job_status(session, proposal_id, phase, "running", redis=ctx["redis"])
 
     try:
         async with async_session_factory() as session:
@@ -65,14 +68,14 @@ async def _run_phase(ctx: dict, phase: str, proposal_id: str) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.exception("pipeline phase %s failed for %s", phase, proposal_id)
         async with async_session_factory() as session:
-            await _set_job_status(session, proposal_id, phase, "failed", str(exc))
+            await _set_job_status(session, proposal_id, phase, "failed", str(exc), redis=ctx["redis"])
         await publish(ctx["redis"], proposal_id, {
             "type": "pipeline_error", "phase": phase, "error": str(exc),
         })
         return  # don't re-raise — terminal failure is recorded; user retries via /retry
 
     async with async_session_factory() as session:
-        await _set_job_status(session, proposal_id, phase, "complete")
+        await _set_job_status(session, proposal_id, phase, "complete", redis=ctx["redis"])
 
     next_phase = _NEXT_PHASE.get(phase)
     if next_phase:

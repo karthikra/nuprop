@@ -174,3 +174,38 @@ async def test_chain_enqueue_clears_stale_result_key_for_benchmarks_to_cost_mode
     redis.delete.assert_awaited_once_with(f"arq:result:{pid}:build_cost_model")
     redis.enqueue_job.assert_awaited_once()
     assert redis.enqueue_job.await_args.args[0] == "build_cost_model"
+
+
+async def test_run_phase_broadcasts_job_status_running_then_complete(db, make_proposal_db, monkeypatch):
+    import json
+
+    from app.services.pipeline_service import PipelineService
+    from app.workers.pipeline import _run_phase
+    monkeypatch.setattr(PipelineService, "run_research", AsyncMock(return_value=None))
+    agency, client, proposal = await make_proposal_db()
+    redis = AsyncMock()
+    await _run_phase({"redis": redis}, "run_research", str(proposal.id))
+    states = []
+    for call in redis.publish.await_args_list:
+        env = json.loads(call.args[1])
+        if env["payload"].get("type") == "job_status":
+            states.append(env["payload"]["state"])
+    assert "running" in states
+    assert "complete" in states
+
+
+async def test_run_phase_broadcasts_job_status_failed_on_error(db, make_proposal_db, monkeypatch):
+    import json
+
+    from app.services.pipeline_service import PipelineService
+    from app.workers.pipeline import _run_phase
+    monkeypatch.setattr(PipelineService, "run_research", AsyncMock(side_effect=RuntimeError("boom")))
+    agency, client, proposal = await make_proposal_db()
+    redis = AsyncMock()
+    await _run_phase({"redis": redis}, "run_research", str(proposal.id))
+    failed = []
+    for call in redis.publish.await_args_list:
+        env = json.loads(call.args[1])
+        if env["payload"].get("type") == "job_status" and env["payload"]["state"] == "failed":
+            failed.append(env["payload"])
+    assert failed and failed[0]["error"]

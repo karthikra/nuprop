@@ -387,6 +387,9 @@ class ChatViewModel(ViewModelBase):
             await self.proposal_repo.update(proposal_id, pipeline_state=pipeline)
             await self._db.commit()  # commit before enqueue so the worker sees queued state
             await self._enqueue(job, proposal_id)
+            await ws_manager.broadcast(str(proposal_id), {
+                "type": "job_status", "phase": job, "state": "queued", "error": None,
+            })
             label = intent["phase"].replace("_", " ")
             return await self._ack(proposal_id, f"Re-running {label}…", current_phase)
 
