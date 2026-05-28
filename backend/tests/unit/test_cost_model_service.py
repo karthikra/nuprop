@@ -64,3 +64,12 @@ def test_find_line_item_index_is_case_insensitive():
     assert find_line_item_index(_model(), "logo") == 0
     assert find_line_item_index(_model(), "BRAND guidelines") == 1
     assert find_line_item_index(_model(), "nope") is None
+
+
+def test_apply_cost_item_edit_does_not_mutate_input():
+    model = _model()
+    snapshot = {"line_items": [dict(li) for li in model["line_items"]]}
+    apply_cost_item_edit(model, index=0, field="quantity", value=5)
+    # the original dict must be unchanged
+    assert model["line_items"][0]["quantity"] == snapshot["line_items"][0]["quantity"]
+    assert model["line_items"][0]["total"] == snapshot["line_items"][0]["total"]

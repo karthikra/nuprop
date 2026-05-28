@@ -9,6 +9,8 @@ applied AFTER a percentage discount.
 
 from __future__ import annotations
 
+import copy
+
 ALLOWED_FIELDS = ("quantity", "unit_cost")
 GST_RATE = 0.18
 
@@ -22,17 +24,21 @@ def apply_cost_item_edit(
 ) -> dict:
     """Apply a single line-item edit and recompute all totals.
 
-    Mutates and returns ``cost_model``. Transcribes the handler's formula
-    exactly: ``item["total"] = unit_cost * quantity``; ``subtotal`` is the sum
-    of line-item totals; the discount is a percentage from
-    ``discount_percent`` (default 0) applied to the subtotal; GST is 18% of the
-    post-discount total; ``grand_total`` = post-discount total + GST.
+    Returns a NEW dict and does not mutate the input ``cost_model`` — the input
+    is deep-copied first so the caller's live object (e.g. a SQLAlchemy
+    attribute) is never touched, even on a mid-operation exception. Transcribes
+    the handler's formula exactly: ``item["total"] = unit_cost * quantity``;
+    ``subtotal`` is the sum of line-item totals; the discount is a percentage
+    from ``discount_percent`` (default 0) applied to the subtotal; GST is 18% of
+    the post-discount total; ``grand_total`` = post-discount total + GST.
 
     Raises ``CostItemEditError`` for an unknown field, a missing
     ``line_items``, or an out-of-range index.
     """
     if not cost_model or "line_items" not in cost_model:
         raise CostItemEditError("No cost model to update")
+
+    cost_model = copy.deepcopy(cost_model)
 
     items = cost_model["line_items"]
     if index < 0 or index >= len(items):

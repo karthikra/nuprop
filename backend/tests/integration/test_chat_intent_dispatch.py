@@ -193,6 +193,35 @@ async def test_refine_section_preserves_assets_and_acks(
 
 
 @pytest.mark.asyncio
+async def test_crafted_section_type_is_rejected_and_does_not_write(
+    client, registered, db, make_proposal_api, monkeypatch,
+):
+    """A non-canonical section_type from the classifier must NOT reach
+    getattr/repo.update (which would read/write an arbitrary model column).
+    It must ack gracefully and leave the row untouched."""
+    _patch_intent(monkeypatch, {
+        "kind": "regenerate_section", "section_type": "agency_id", "confidence": 0.95,
+    })
+    p = await make_proposal_api(client, registered.headers)
+    repo = ProposalRepository(db)
+    original = await repo.get_by_id(p["id"])
+    original_agency = str(original.agency_id)
+    await repo.update(p["id"], pipeline_state={"current_phase": "section_editor"})
+    await db.commit()
+
+    resp = await client.post(
+        f"{API}/chat/{p['id']}/send", headers=registered.headers,
+        json={"content": "regenerate the agency thing"},
+    )
+    assert resp.status_code == 201
+    fresh = await repo.get_by_id(p["id"])
+    # agency_id (and the row) untouched — no arbitrary-column write happened
+    assert str(fresh.agency_id) == original_agency
+    text = " ".join((m.get("content") or "") for m in resp.json()).lower()
+    assert "don't recognize" in text or "do not recognize" in text or "unrecognize" in text
+
+
+@pytest.mark.asyncio
 async def test_ask_question_answers_with_assistant_text(
     client, registered, make_proposal_api, monkeypatch,
 ):

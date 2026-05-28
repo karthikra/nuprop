@@ -389,6 +389,12 @@ class ChatViewModel(ViewModelBase):
 
         if kind in ("regenerate_section", "refine_section"):
             section_type = intent["section_type"]
+            if section_type not in SECTION_ORDER:
+                return await self._ack(
+                    proposal_id,
+                    f'I don\'t recognize the section "{section_type}".',
+                    current_phase,
+                )
             instructions = intent.get("instructions") if kind == "refine_section" else None
             new_payload = await regenerate_section_content(
                 proposal, section_type, instructions, self._db,
