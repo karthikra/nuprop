@@ -25,11 +25,29 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
-      - name: Ensure worker process group is running
+      # Safety net for the `fly secrets set` path, which stops the worker group
+      # without restarting it. A normal `flyctl deploy` already starts the
+      # primary worker, so this is usually a no-op. Only act when NO worker is
+      # running — this leaves an intentionally-stopped standby alone, and a
+      # transient single-machine start error never fails the deploy.
+      - name: Ensure a worker is running
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
-          set -euo pipefail
-          flyctl machine list -a nuprop --json \
-            | jq -r '.[] | select(.config.metadata.fly_process_group == "worker" and .state == "stopped") | .id' \
-            | xargs -r -I{} flyctl machine start {} -a nuprop
+          set +e
+          machines=$(flyctl machine list -a nuprop --json)
+          running=$(echo "$machines" | jq '[.[] | select(.config.metadata.fly_process_group == "worker" and .state == "started")] | length')
+          running=${running:-0}
+          echo "Worker machines running: $running"
+          if [ "$running" -eq 0 ]; then
+            target=$(echo "$machines" | jq -r 'first(.[] | select(.config.metadata.fly_process_group == "worker" and .state == "stopped") | .id) // empty')
+            if [ -n "$target" ]; then
+              echo "No worker running — starting $target"
+              flyctl machine start "$target" -a nuprop || echo "WARN: could not start $target; next deploy will retry"
+            else
+              echo "WARN: no stopped worker available to start"
+            fi
+          else
+            echo "Worker already running — standby machines left stopped (intentional)."
+          fi
+          exit 0
